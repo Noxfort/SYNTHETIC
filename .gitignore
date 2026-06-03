@@ -1,0 +1,30 @@
+# Ignorar dados gerados
+output/
+logs/
+
+# Ignorar arquivos de mapas (grandes XMLs)
+*.osm
+maps/
+
+# Ignorar modelos de IA pesados
+src/models/vault/*.gguf
+
+# Banco de dados e configurações locais sensíveis
+*.db
+*.sqlite3
+
+# Ignorar arquivos do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignorar ambientes virtuais e chaves
+.venv/
+venv/
+env/
+.env
+
+# Ignorar pastas de IDE e sistema
+.vscode/
+.idea/
+.DS_Store

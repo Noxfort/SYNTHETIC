@@ -1,0 +1,18 @@
+{
+  "loop_readings": [
+    {
+      "sensor_id": "",
+      "timestamp_start": "",
+      "timestamp_end": "",
+      "location": {
+        "lat": 0.0,
+        "lon": 0.0
+      },
+      "metrics": {
+        "total_volume": 0,
+        "average_speed_kmh": 0.0,
+        "occupancy_rate_percentage": 0.0
+      }
+    }
+  ]
+}

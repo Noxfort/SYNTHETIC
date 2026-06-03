@@ -1,0 +1,12 @@
+numpy
+pandas
+lxml
+scikit-learn
+huggingface_hub
+optuna
+torch
+torchvision
+llama-cpp-python
+tkintermapview
+haversine
+torch_geometric

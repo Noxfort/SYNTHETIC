@@ -1,0 +1,60 @@
+{
+  "transitions": {
+    "Sunny": ["Sunny", "Partly Cloudy", "Hazy", "Overcast"],
+    "Partly Cloudy": ["Sunny", "Partly Cloudy", "Overcast", "Cloudy"],
+    "Cloudy": ["Partly Cloudy", "Cloudy", "Overcast", "Drizzle", "Fog"],
+    "Overcast": ["Sunny", "Cloudy", "Overcast", "Rain", "Drizzle", "Snow"],
+    "Fog": ["Cloudy", "Partly Cloudy", "Drizzle"],
+    "Drizzle": ["Overcast", "Cloudy", "Rain", "Fog"],
+    "Rain": ["Drizzle", "Overcast", "Thunderstorm", "Heavy Rain"],
+    "Heavy Rain": ["Rain", "Thunderstorm"],
+    "Thunderstorm": ["Heavy Rain", "Rain", "Hail"],
+    "Hail": ["Thunderstorm", "Heavy Rain", "Rain"],
+    "Snow": ["Overcast", "Heavy Snow", "Freezing Rain"],
+    "Heavy Snow": ["Snow", "Blizzard"],
+    "Blizzard": ["Heavy Snow", "Snow"],
+    "Freezing Rain": ["Snow", "Rain", "Overcast"],
+    "Hazy": ["Sunny", "Partly Cloudy"]
+  },
+  "category_map": {
+    "Sunny": "Clear/Cloudy",
+    "Partly Cloudy": "Clear/Cloudy",
+    "Cloudy": "Clear/Cloudy",
+    "Overcast": "Clear/Cloudy",
+    "Hazy": "Clear/Cloudy",
+    "Fog": "Clear/Cloudy",
+    "Drizzle": "Precipitation",
+    "Rain": "Precipitation",
+    "Heavy Rain": "Precipitation",
+    "Snow": "Precipitation",
+    "Freezing Rain": "Precipitation",
+    "Thunderstorm": "Extreme",
+    "Hail": "Extreme",
+    "Heavy Snow": "Extreme",
+    "Blizzard": "Extreme"
+  },
+  "intensity_map": {
+    "Clear/Cloudy": ["mild", "persistent", "settled"],
+    "Precipitation": ["light", "moderate", "heavy", "scattered", "unpredictable"],
+    "Extreme": ["violent", "severe", "unrelenting", "dangerous"]
+  },
+  "char_map": {
+    "Sunny": ["and blindingly bright", "with extreme heat", "with a mild breeze", "and rapidly warming"],
+    "Partly Cloudy": ["with a pleasant breeze", "and comfortable temperatures", "with shifting shadows"],
+    "Cloudy": ["and humid", "with dropping temperatures", "and very still air", "with urban smog"],
+    "Overcast": ["and oppressively humid", "with a cold front moving in", "and eerily quiet"],
+    "Hazy": ["with urban smog", "with poor air quality", "and unusually warm"],
+    "Fog": ["with very low visibility", "and damp, chilling air", "causing widespread delays"],
+    "Drizzle": ["and very humid", "with low visibility", "and persistent dampness"],
+    "Rain": ["with wet, slick roads", "and scattered puddles", "with falling temperatures"],
+    "Heavy Rain": ["causing minor flooding", "with very low visibility", "and strong crosswinds"],
+    "Thunderstorm": ["with high winds", "with sudden lightning strikes", "causing localized power outages", "with torrential downpours"],
+    "Hail": ["with unpredictable wind gusts", "causing minor vehicular damage", "and plummeting temperatures"],
+    "Snow": ["with freezing temperatures", "and icy road conditions", "with gentle accumulation"],
+    "Heavy Snow": ["with rapidly accumulating snowbanks", "causing major traffic disruptions", "with very low visibility"],
+    "Blizzard": ["with high winds and whiteout conditions", "with extreme freezing temperatures", "paralyzing the road network"],
+    "Freezing Rain": ["creating black ice on roads", "with treacherous driving conditions", "and dropping temperatures"]
+  },
+  "initial_states": ["Sunny", "Partly Cloudy", "Cloudy", "Overcast", "Rain", "Snow"],
+  "initial_weights": [30, 20, 20, 10, 10, 10]
+}

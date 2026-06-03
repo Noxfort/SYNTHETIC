@@ -1,0 +1,125 @@
+# SYNTHETIC Architecture Overview
+
+The `SYNTHETIC` project is an AI-orchestrated engine designed for multi-modal traffic scenario synthesis. It employs a multi-agent, dynamically memory-managed architecture to generate physically coherent and contextually rich traffic data based on natural language constraints (weather, day of the week, UI-defined flow levels) and real-world map topologies.
+
+This architecture strictly enforces **Sequential Resource Release**, **Lazy Loading**, and the **Single Responsibility Principle (SRP)**. Multiple heavy neural networks (SLM, VAE-TCN, CSDI, GATv2) are utilized, but they are guaranteed to never coexist in memory.
+
+---
+
+## 🏗️ High-Level System Workflow
+
+The generation pipeline is split into distinct phases to optimize memory usage and logic isolation:
+
+### Phase 0: Environment & Spatial Initialization
+Before AI generation begins, the **EnvironmentManager** determines the Ground Zero Time and seeds a Markov-chain state machine for realistic weather. Concurrently, the **OSMMapProvider** parses the user-selected `.osm` file to establish real-world topological bounds.
+
+### Phase 1: The "Dreaming" Phase (Cognitive Layer)
+In this phase, the **Phi-4-mini SLM (Screenwriter Agent)** is loaded into memory. It processes inputs based on the dynamic weather and daily constraints to "dream" realistic daily traffic scenarios, converting its internal reasoning into high-dimensional latent vectors. 
+*   **Sequential Action:** Once scripts for the entire simulation duration are generated, the SLM is explicitly purged from memory (`gc.collect()`), freeing resources for Phase 2.
+
+### Phase 2: The "Physics & Synthesis" Phase (Director Active)
+This phase iterates through each pre-generated daily script. The **Director Agent** orchestrates three specialized neural networks in a precise sequence:
+1.  **LightweightGATv2 (Topology Context):** Extracts node/edge features from the OpenStreetMap graph, injecting real road connectivity into the generation constraints.
+2.  **VAE-TCN (Physics Guardian):** Validates the SLM's dream vector against a learned continuous manifold of valid traffic physics. Enforces hard speed bounds (20-110 km/h). If a significant semantic shift is detected, an **AutoML Tuner (Optuna)** rebuilds the Guardian. The model is then purged.
+3.  **CSDI Engine (Generator):** A Conditional Score-based Diffusion model that takes the cleaned vector + graph context and generates actual time-series physics data. Uses a `seed_tail` for day-to-day temporal coherence. Once generation is complete, it is purged.
+
+---
+
+## 🧠 Core Components & Agents
+
+### 1. `SimulationOrchestrator` (The Maestro)
+**File:** `core/simulation_logic.py`
+*   **Role:** The main controller of the ecosystem.
+*   **Responsibilities:** 
+    *   Executes the strict Two-Phase pipeline (Phase 1: Dreaming -> Phase 2: Processing).
+    *   Handles sensor fault injection (anomalies and data gaps).
+    *   Triggers memory cleanup between daily iterations.
+
+### 2. `EnvironmentManager`
+**File:** `core/environment.py`
+*   **Role:** The physical time and weather engine.
+*   **Responsibilities:** 
+    *   Calculates `get_next_monday_midnight()` for Ground Zero synchronization.
+    *   Executes `get_dynamic_weather()` using a predefined JSON Markov-chain state machine (`config/weather_rules.json`) ensuring logical atmospheric evolution (e.g., Rain -> Drizzle).
+
+### 3. `ScreenwriterAgent` & `SLMEngine`
+**Files:** `agents/screenwriter.py`, `models/slm_engine.py`
+*   **Role:** The creative engine.
+*   **Responsibilities:**
+    *   Takes raw constraints.
+    *   Uses a **Thinking Mode** (`<think>...</think>`) in Phi-4-mini to logically reason about traffic density internally.
+    *   Converts thoughts into a 2048-dimensional **Latent Vector**.
+    *   Translates PT-BR UI selections strictly into English for optimal model inference.
+
+### 4. `DirectorAgent`
+**File:** `agents/director.py`
+*   **Role:** The tactical orchestrator and memory manager for Phase 2.
+*   **Responsibilities:**
+    *   **Temporal Inertia:** Blends the new day's vector with 30% of the previous day's vector.
+    *   **Sequential Lazy Loading:** Ensures the `LightweightGATv2`, `VAETCN` and `CSDI` models load one at a time.
+    *   **Mathematical Clamping:** Enforces strict physical realism on diffused speed arrays (20-110 km/h offset).
+
+### 5. `VAETCN` (Physics Guardian)
+**File:** `models/vae_tcn.py`
+*   **Role:** The reality check.
+*   **Mechanism:** A Variational Autoencoder hooked to a Temporal Convolutional Network. It decodes the SLM's dream into a physical projection, then re-encodes it to find the nearest valid mathematical point on the learned traffic manifold. 
+
+### 6. `LightweightGATv2`
+**File:** `models/gatv2.py`
+*   **Role:** Spatial awareness engine.
+*   **Mechanism:** Parses the real-world nodes and edges from the map and creates a graph embedding vector, ensuring data generated by the diffusion model actually fits the intersection constraints of the `.osm` map.
+
+### 7. `CSDIEngine` (The Generator)
+**File:** `models/csdi_engine.py`
+*   **Role:** The time-series synthesist.
+*   **Mechanism:** Deep conditional score-based diffusion model. Generates high-fidelity sequences of `vehicle_flow` and `current_speed` from pure noise, conditioned on the validated vector and graph context.
+
+### 8. `Translator` (i18n UI)
+**File:** `ui/translator.py`
+*   **Role:** Dynamic Localization Manager.
+*   **Mechanism:** Singleton class that reads `ui/locale/*.json` files allowing instant GUI language switching (English, Portuguese, French, Spanish, Russian, Mandarin) without restarting the Python process.
+
+---
+
+## 💾 Memory Lifecycle Diagram
+
+```mermaid
+graph TD
+    A[Start Simulation] --> Z[Parse OSM Map & Init Weather]
+    Z --> B(Load Phi-4 SLM)
+    
+    subgraph PHASE 1: DREAMING
+        B --> C{More Days?}
+        C -- Yes --> D[Screenwriter creates script & vector]
+        D --> C
+    end
+    
+    C -- No --> E(Release Phi-4 SLM)
+    E --> F[Start Daily Processing]
+    
+    subgraph PHASE 2: PROCESSING (Loop per Day)
+        F --> G1(Load GATv2)
+        G1 --> G2[Extract Spatial Context]
+        G2 --> G3(Release GATv2)
+        
+        G3 --> G(Load VAE-TCN)
+        G --> H[Validate Vector & Extract Params]
+        H --> I(Release VAE-TCN)
+        
+        I --> J(Load CSDI)
+        J --> K[Generate Time-Series Data]
+        K --> L[Clamp Speeds 20-110 km/h]
+        L --> M(Release CSDI)
+        M --> N[Apply Noise/Anomalies]
+        N --> O[Write Output Files]
+    end
+    
+    O --> P{Next Day?}
+    P -- Yes --> F
+    P -- No --> Q([End Simulation])
+```
+
+## 🛠️ Design Principles Adhered To
+*   **Single Responsibility Principle (SRP):** Agents are thin orchestrators. Neural logic, parsing, and optimization are separated into `models/`, `core/`, and `optimizer/`. Time/Weather logic is strictly delegated to `EnvironmentManager`.
+*   **Open/Closed Principle (OCP):** UI translations and weather mechanics are driven by JSON configurations, allowing expansion without modifying core Python code.
+*   **Resource Efficiency over Speed:** By intentionally trading slightly slower execution times (due to model loading/unloading) for massive reductions in peak VRAM consumption, the architecture ensures stability on consumer hardware.

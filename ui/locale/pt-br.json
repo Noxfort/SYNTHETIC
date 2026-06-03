@@ -1,0 +1,59 @@
+{
+    "app_title": "SYNTHETIC",
+    "lang_label": "Idioma:",
+    "lang_en": "English",
+    "lang_pt": "Português (Brasil)",
+    
+    "section_sources": "Fontes de Dados",
+    "waze": "Waze (JSON)",
+    "tomtom": "TomTom (JSON)",
+    "loop": "Laço Indutivo (CSV)",
+    "camera": "Câmera (JSON)",
+
+    "section_problems": "Injetar Problemas",
+    "gaps": "Injetar Falhas (Gaps)",
+    "anomalies": "Injetar Anomalias (Ruído)",
+
+    "section_settings": "Configurações da Simulação",
+    "duration": "Duração (DIAS):",
+    "interval": "Intervalo (segundos):",
+    "flow_level": "Nível de Fluxo:",
+    
+    "flow_small": "Pequeno",
+    "flow_medium": "Médio",
+    "flow_large": "Grande",
+    "flow_chaotic": "Caótico",
+
+    "slm_mode": "SLM Mode:",
+    "slm_ultra": "Ultrarealista",
+    "slm_real": "Realista",
+    "slm_creative": "Criativo",
+
+    "num_cameras": "Nº de Câmeras:",
+    "num_loops": "Nº de Laços:",
+
+    "section_output": "Pasta de Destino (Onde 'output' será criado)",
+    "btn_select": "Selecionar...",
+
+    "section_map": "Arquivo de Mapa OSM",
+    "btn_browse_osm": "Procurar .osm",
+
+    "btn_generate": "GERAR DADOS",
+    "btn_loading_map": "Carregando Mapa...",
+    "btn_generating": "Gerando...",
+
+    "err_title": "Erro",
+    "err_osm_missing": "Por favor, selecione um arquivo de mapa .osm válido primeiro.",
+    "err_osm_failed": "Falha ao ler o arquivo OSM:\n{0}",
+    "err_generation": "Ocorreu um erro:\n{0}",
+
+    "success_title": "Sucesso",
+    "success_msg": "Dados sintéticos gerados com sucesso em:\n{0}",
+
+    "map_title": "Selecionar Sensores no Mapa",
+    "map_err_tkmap": "tkintermapview não está instalado. Não é possível mostrar o mapa.",
+    "map_btn_confirm": "Confirmar Seleção",
+    "map_inst_camera": "Clique com botão direito no mapa para alocar {0} Câmera(s) [Vermelho]",
+    "map_inst_loop": "Clique com botão direito no mapa para alocar {0} Laço(s) [Azul]",
+    "map_inst_done": "Todos os sensores alocados! Clique em 'Confirmar Seleção'."
+}

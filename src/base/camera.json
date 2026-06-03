@@ -1,0 +1,20 @@
+{
+  "event_template": {
+    "event_type": "recognition",
+    "timestamp": "",
+    "camera_id": "",
+    "location": {
+      "lat": 0.0,
+      "lon": 0.0
+    },
+    "vehicle": {
+      "plate_string": "",
+      "confidence": 0.0,
+      "attributes": {
+        "color": "",
+        "type": "",
+        "estimated_speed_kmh": 0.0
+      }
+    }
+  }
+}

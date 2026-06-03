@@ -1,0 +1,13 @@
+{
+    "base_flow": {
+        "flowSegmentData": {
+            "segmentId": "",
+            "streetName": "",
+            "currentSpeed_kmh": 0.0,
+            "freeFlowSpeed_kmh": 0.0,
+            "delay_seconds": 0,
+            "jam_severity": "",
+            "coordinates": []
+        }
+    }
+}

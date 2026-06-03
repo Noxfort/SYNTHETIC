@@ -1,0 +1,59 @@
+{
+    "app_title": "SYNTHETIC",
+    "lang_label": "Language:",
+    "lang_en": "English",
+    "lang_pt": "Português (Brasil)",
+    
+    "section_sources": "Data Sources",
+    "waze": "Waze (JSON)",
+    "tomtom": "TomTom (JSON)",
+    "loop": "Inductive Loop (CSV)",
+    "camera": "Camera (JSON)",
+
+    "section_problems": "Inject Problems",
+    "gaps": "Inject Gaps (Hardware Failures)",
+    "anomalies": "Inject Anomalies (Sensor Noise)",
+
+    "section_settings": "Simulation Settings",
+    "duration": "Duration (DAYS):",
+    "interval": "Interval (seconds):",
+    "flow_level": "Flow Level:",
+    
+    "flow_small": "Small",
+    "flow_medium": "Medium",
+    "flow_large": "Large",
+    "flow_chaotic": "Chaotic",
+
+    "slm_mode": "SLM Mode:",
+    "slm_ultra": "Ultra-Realistic",
+    "slm_real": "Realistic",
+    "slm_creative": "Creative",
+
+    "num_cameras": "Number of Cameras:",
+    "num_loops": "Number of Loops:",
+
+    "section_output": "Destination Folder (Where 'output' will be created)",
+    "btn_select": "Select...",
+
+    "section_map": "OSM Map File",
+    "btn_browse_osm": "Browse .osm",
+
+    "btn_generate": "GENERATE DATA",
+    "btn_loading_map": "Loading Map...",
+    "btn_generating": "Generating...",
+
+    "err_title": "Error",
+    "err_osm_missing": "Please select a valid .osm map file first.",
+    "err_osm_failed": "Failed to read OSM file:\n{0}",
+    "err_generation": "An error occurred:\n{0}",
+
+    "success_title": "Success",
+    "success_msg": "Synthetic data generated successfully at:\n{0}",
+
+    "map_title": "Select Sensor Locations on Map",
+    "map_err_tkmap": "tkintermapview is not installed. Map cannot be shown.",
+    "map_btn_confirm": "Confirm Selections",
+    "map_inst_camera": "Right-click on the map to place {0} Camera(s) [Red]",
+    "map_inst_loop": "Right-click on the map to place {0} Loop(s) [Blue]",
+    "map_inst_done": "All sensors placed! Click 'Confirm Selections'."
+}
