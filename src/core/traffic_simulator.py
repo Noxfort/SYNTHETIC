@@ -24,6 +24,7 @@ import random
 from typing import Dict, Any
 from ui.interfaces import IFlowStrategy
 from src.core.logger import logger
+from src.core.constants import DEFAULT_SPEED_CLAMP_MIN, DEFAULT_SPEED_CLAMP_MAX
 
 class BaseFlowStrategy(IFlowStrategy):
     """
@@ -67,7 +68,7 @@ class BaseFlowStrategy(IFlowStrategy):
         
         return {
             "vehicle_flow": vehicle_count,
-            "current_speed": max(5, int(current_speed)),
+            "current_speed": min(max(DEFAULT_SPEED_CLAMP_MIN, int(current_speed)), DEFAULT_SPEED_CLAMP_MAX),
             "free_flow_speed": self.free_flow_speed
         }
 
@@ -87,22 +88,28 @@ class LargeFlowStrategy(BaseFlowStrategy):
         super().__init__(base_amplitude=250, free_flow_speed=60)
 
 
-class ChaoticFlowStrategy(IFlowStrategy):
+class ChaoticFlowStrategy(BaseFlowStrategy):
     """
-    Special logic for Chaotic flow, ignoring standard peak factors
-    to mimic severe congestion close to maximal capacity.
+    Special logic for Chaotic flow, applying standard peak factors
+    but maintaining severe congestion close to maximal capacity during peaks.
     """
     def __init__(self) -> None:
-        self.base_amplitude: int = 600
-        self.free_flow_speed: int = 50
+        super().__init__(base_amplitude=600, free_flow_speed=50)
 
     def get_ground_truth(self, timestamp: datetime.datetime) -> Dict[str, Any]:
-        saturation: float = random.uniform(0.70, 0.90)
-        vehicle_count: int = int(self.base_amplitude * saturation)
+        hour_factor: float = self._get_peak_hour_factor(timestamp.hour + timestamp.minute / 60.0)
+        day_factor: float = self._get_weekday_factor(timestamp.weekday())
         
-        fluidity: float = 1.0 - saturation 
+        # In chaotic, saturation is heavily influenced by the peak factor
+        # At 3 AM (hour_factor ~0.1), saturation is much lower.
+        base_saturation: float = random.uniform(0.70, 0.90)
+        actual_saturation = base_saturation * hour_factor * day_factor
+        
+        vehicle_count: int = int(self.base_amplitude * actual_saturation)
+        
+        fluidity: float = max(0.1, 1.0 - actual_saturation)
         current_speed: float = self.free_flow_speed * fluidity
-        current_speed = max(3, int(current_speed))
+        current_speed = min(max(DEFAULT_SPEED_CLAMP_MIN, int(current_speed)), DEFAULT_SPEED_CLAMP_MAX)
 
         return {
             "vehicle_flow": vehicle_count,

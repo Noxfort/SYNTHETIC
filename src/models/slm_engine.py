@@ -95,6 +95,9 @@ class SLMEngine:
             "\n\n[CRITICAL DIRECTIVE]: You are in THINKING MODE. "
             "Before providing the final scenario, you MUST open a <think> tag and write out your step-by-step "
             "logical reasoning about the weather, traffic density, and physical constraints of the requested situation. "
+            "IMPORTANT: Base your reasoning on real-world urban traffic dynamics. "
+            "Remember that the core behavior of traffic is universal across small, medium, and large cities—what changes is the intensity and duration. "
+            "Traffic is highly temporal, with distinct peak hours and calm off-peak/night hours, even in chaotic scenarios. "
             "Close with </think> and then write the final scenario description."
         )
 
