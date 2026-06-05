@@ -63,7 +63,7 @@ flowchart TD
     ENV -->|Dynamic Weather State| A
     A -->|2048-dim Latent Vector| C
     B -->|Graph Context| C
-    C -->|Validated Physics (20-110 km/h)| D
+    C -- "Validated Physics (20-110 km/h)" --> D
     D -->|Time-Series Arrays| E
     E -->|Corrupted Data| F
     E -->|Corrupted Data| G
