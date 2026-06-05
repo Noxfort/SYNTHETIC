@@ -25,8 +25,17 @@ import random
 import copy
 import uuid
 import math
+from typing import Dict, List, Any, Optional
 from ui.interfaces import IDataGenerator
-
+from src.core.logger import logger
+from src.core.constants import (
+    EARTH_RADIUS_METERS,
+    KMH_TO_MS_MULTIPLIER,
+    DEFAULT_FALLBACK_LAT,
+    DEFAULT_FALLBACK_LON,
+    MIN_GENERATION_INTERVAL_SECS,
+    DEFAULT_GAP_PROB_WAZE
+)
 
 
 class WazeGenerator(IDataGenerator):
@@ -37,36 +46,42 @@ class WazeGenerator(IDataGenerator):
     Enforces a minimum generation interval of 5 minutes (300 seconds).
     """
     
-    def __init__(self, config: dict):
-        self.config = config
-        self.output_dir = os.path.join(config['output_directory'], 'waze')
-        self.problems = config['problems']
-        self.last_generation_time = None
+    def __init__(self, config: dict) -> None:
+        self.config: dict = config
+        self.output_dir: str = os.path.join(config['output_directory'], 'waze')
+        self.problems: dict = config['problems']
+        self.last_generation_time: Optional[datetime.datetime] = None
         
         os.makedirs(self.output_dir, exist_ok=True)
 
-        self.coordinates = self._extract_coordinates_from_map()
-        self.waze_templates = self._load_templates()
-        self.segment_length_meters = self._calculate_route_length(self.coordinates)
+        self.coordinates: List[Dict[str, float]] = self._extract_coordinates_from_map()
+        self.waze_templates: dict = self._load_templates()
+        self.segment_length_meters: float = self._calculate_route_length(self.coordinates)
         
-        print(f"[WazeGenerator] Route distance: {self.segment_length_meters:.2f} meters")
+        logger.info(f"[WazeGenerator] Route distance: {self.segment_length_meters:.2f} meters")
 
     def _load_templates(self) -> dict:
         """Loads static templates and base structure from src/base/waze.json."""
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        file_path = os.path.join(base_path, 'base', 'waze.json')
+        base_path: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_path: str = os.path.join(base_path, 'base', 'waze.json')
 
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception as e:
-            print(f"[CRITICAL] Could not load waze.json: {e}")
+        except (FileNotFoundError, PermissionError) as e:
+            logger.error(f"[WazeGenerator] Could not find base template file waze.json: {e}")
+            return {
+                "base_feed": {"jams": [], "endTimeMillis": 0, "startTimeMillis": 0, "startTime": "", "endTime": ""},
+                "jam": {"street": "Unknown", "city": "Unknown", "country": "BR", "type": "NONE"}
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"[WazeGenerator] Base template file waze.json is corrupted: {e}")
             return {
                 "base_feed": {"jams": [], "endTimeMillis": 0, "startTimeMillis": 0, "startTime": "", "endTime": ""},
                 "jam": {"street": "Unknown", "city": "Unknown", "country": "BR", "type": "NONE"}
             }
 
-    def _extract_coordinates_from_map(self) -> list:
+    def _extract_coordinates_from_map(self) -> List[Dict[str, float]]:
         """Extracts a random road segment from the OSM Map Provider to serve as the global incident line."""
         map_provider = self.config.get('map', {}).get('provider')
         if map_provider and map_provider.ways:
@@ -78,12 +93,12 @@ class WazeGenerator(IDataGenerator):
                 if nd in map_provider.nodes:
                     lat, lon = map_provider.nodes[nd]
                     coords.append({'latitude': lat, 'longitude': lon})
-            return coords
-        return [{'latitude': -23.3, 'longitude': -51.1}] # Fallback
+            if coords:
+                return coords
+        return [{'latitude': DEFAULT_FALLBACK_LAT, 'longitude': DEFAULT_FALLBACK_LON}] # Fallback
 
-    def _haversine_distance(self, lat1, lon1, lat2, lon2):
-        """Calculates distance in meters between two points."""
-        R = 6371000 # Earth radius
+    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculates distance in meters between two points using central constants."""
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
         delta_phi = math.radians(lat2 - lat1)
@@ -94,12 +109,13 @@ class WazeGenerator(IDataGenerator):
             math.sin(delta_lambda / 2.0)**2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-        return R * c
+        return EARTH_RADIUS_METERS * c
 
-    def _calculate_route_length(self, coordinates: list) -> float:
+    def _calculate_route_length(self, coordinates: List[Dict[str, float]]) -> float:
         """Sums the distance of all points in the coordinate list."""
-        if not coordinates: return 0.0
-        total_distance = 0.0
+        if not coordinates: 
+            return 0.0
+        total_distance: float = 0.0
         for i in range(len(coordinates) - 1):
             p1 = coordinates[i]
             p2 = coordinates[i+1]
@@ -108,7 +124,7 @@ class WazeGenerator(IDataGenerator):
             total_distance += dist
         return total_distance
 
-    def generate(self, ground_truth: dict, timestamp: datetime.datetime) -> None:
+    def generate(self, ground_truth: Dict[str, Any], timestamp: datetime.datetime) -> None:
         """Generates the JSON file for Waze."""
         
         # MAESTRO MACRO-GAP CHECK: Abort generation if the physics engine injected a blackout
@@ -117,34 +133,34 @@ class WazeGenerator(IDataGenerator):
         
         if self.last_generation_time is not None:
             time_since_last = (timestamp - self.last_generation_time).total_seconds()
-            if time_since_last < 300:
+            if time_since_last < MIN_GENERATION_INTERVAL_SECS:
                 return
                 
         self.last_generation_time = timestamp
 
-        if self.problems['gaps'] and random.random() < 0.1:
+        if self.problems['gaps'] and random.random() < DEFAULT_GAP_PROB_WAZE:
             return
 
-        data = copy.deepcopy(self.waze_templates.get("base_feed", {}))
+        data: dict = copy.deepcopy(self.waze_templates.get("base_feed", {}))
         
-        now_ms = int(timestamp.timestamp() * 1000)
+        now_ms: int = int(timestamp.timestamp() * 1000)
         data['startTimeMillis'] = now_ms
         data['endTimeMillis'] = now_ms + 60000
         data['startTime'] = timestamp.isoformat()
         data['endTime'] = (timestamp + datetime.timedelta(seconds=60)).isoformat()
 
-        current_speed_kmh = float(ground_truth['current_speed'])
-        free_flow_speed_kmh = float(ground_truth['free_flow_speed'])
+        current_speed_kmh: float = float(ground_truth['current_speed'])
+        free_flow_speed_kmh: float = float(ground_truth['free_flow_speed'])
         
-        curr_speed_ms = max(0.1, current_speed_kmh / 3.6)
-        free_speed_ms = max(0.1, free_flow_speed_kmh / 3.6)
+        curr_speed_ms: float = max(0.1, current_speed_kmh / KMH_TO_MS_MULTIPLIER)
+        free_speed_ms: float = max(0.1, free_flow_speed_kmh / KMH_TO_MS_MULTIPLIER)
 
-        real_time_sec = self.segment_length_meters / curr_speed_ms
-        ideal_time_sec = self.segment_length_meters / free_speed_ms
-        delay_seconds = max(0, int(real_time_sec - ideal_time_sec))
+        real_time_sec: float = self.segment_length_meters / curr_speed_ms
+        ideal_time_sec: float = self.segment_length_meters / free_speed_ms
+        delay_seconds: int = max(0, int(real_time_sec - ideal_time_sec))
 
-        ratio = current_speed_kmh / free_flow_speed_kmh if free_flow_speed_kmh > 0 else 0
-        level = 0
+        ratio: float = current_speed_kmh / free_flow_speed_kmh if free_flow_speed_kmh > 0 else 0.0
+        level: int = 0
         if ratio < 0.9: level = 1
         if ratio < 0.7: level = 2
         if ratio < 0.5: level = 3
@@ -152,7 +168,7 @@ class WazeGenerator(IDataGenerator):
         if current_speed_kmh < 5: level = 5
 
         # Merge dynamic data with static template for JAM
-        jam = copy.deepcopy(self.waze_templates.get("jam", {}))
+        jam: dict = copy.deepcopy(self.waze_templates.get("jam", {}))
         jam["uuid"] = str(uuid.uuid4())
         jam["pubMillis"] = now_ms
         jam["speed"] = int(current_speed_kmh)
@@ -161,16 +177,18 @@ class WazeGenerator(IDataGenerator):
         jam["delay"] = delay_seconds
         jam["line"] = [{"x": p['longitude'], "y": p['latitude']} for p in self.coordinates]
         
+        if 'jams' not in data:
+            data['jams'] = []
         data['jams'].append(jam)
 
         # Alert generation removed to simplify JSON output.
 
-        ts_string = timestamp.strftime("%Y%m%d_%H%M%S")
-        filename = f"waze_feed_{ts_string}.json"
-        filepath = os.path.join(self.output_dir, filename)
+        ts_string: str = timestamp.strftime("%Y%m%d_%H%M%S")
+        filename: str = f"waze_feed_{ts_string}.json"
+        filepath: str = os.path.join(self.output_dir, filename)
         
         try:
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"WazeGenerator Error: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.error(f"WazeGenerator IO Error on {filename}: {e}")

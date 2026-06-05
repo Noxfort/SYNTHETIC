@@ -54,17 +54,19 @@ class LightweightGATv2(nn.Module):
         if batch is None:
             batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
             
-        # GATv2 Convolution 1
-        x = self.conv1(x, edge_index)
-        x = F.elu(x)
-        x = F.dropout(x, p=0.2, training=self.training)
-        
-        # GATv2 Convolution 2
-        x = self.conv2(x, edge_index)
-        x = F.elu(x)
-        
-        # Global Pooling to get a single embedding vector for the entire graph
-        graph_embedding = global_mean_pool(x, batch) # Shape: [num_graphs, out_channels]
+        device_type = 'cuda' if x.is_cuda else 'cpu'
+        with torch.autocast(device_type=device_type, enabled=(device_type == 'cuda')):
+            # GATv2 Convolution 1
+            x = self.conv1(x, edge_index)
+            x = F.elu(x)
+            x = F.dropout(x, p=0.2, training=self.training)
+            
+            # GATv2 Convolution 2
+            x = self.conv2(x, edge_index)
+            x = F.elu(x)
+            
+            # Global Pooling to get a single embedding vector for the entire graph
+            graph_embedding = global_mean_pool(x, batch) # Shape: [num_graphs, out_channels]
         
         return graph_embedding
 

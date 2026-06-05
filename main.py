@@ -21,8 +21,21 @@
 import threading
 import sys
 import os
+from typing import Dict, Any, Callable
+import torch
 
-def run_simulation(config, on_success, on_error):
+# Ativar TF32 globalmente para GPUs modernas (Ampere+)
+if torch.cuda.is_available():
+    try:
+        torch.set_float32_matmul_precision('high')
+        torch.backends.cudnn.allow_tf32 = True
+    except AttributeError:
+        pass
+
+from src.core.logger import logger
+from src.core.dependency_checker import DependencyChecker, DependencyError
+
+def run_simulation(config: Dict[str, Any], on_success: Callable[[str], None], on_error: Callable[[Exception], None]) -> None:
     """
     Executed in the background thread.
     Imports core logic and runs the simulation orchestrator.
@@ -45,10 +58,14 @@ def run_simulation(config, on_success, on_error):
         
         on_success(config["output_directory"])
     
+    except (ImportError, ValueError, RuntimeError) as e:
+        logger.error(f"[main] Simulation failed during setup/execution: {e}", exc_info=True)
+        on_error(e)
     except Exception as e:
+        logger.critical(f"[main] Unexpected catastrophic error in simulation: {e}", exc_info=True)
         on_error(e)
 
-def start_simulation(config, on_success, on_error):
+def start_simulation(config: Dict[str, Any], on_success: Callable[[str], None], on_error: Callable[[Exception], None]) -> None:
     """
     Called by the GUI to start the simulation process.
     Spawns a thread so the UI is not blocked.
@@ -64,6 +81,13 @@ if __name__ == "__main__":
     # Ensure the script runs with the current directory in PYTHONPATH
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     
+    # Run heavy dependency validation before GUI boot
+    try:
+        DependencyChecker.verify_all_dependencies(fail_on_missing=True)
+    except DependencyError as err:
+        logger.critical(f"FATAL: Dependency check failed: {err}")
+        sys.exit(1)
+        
     from ui.gui import DataGeneratorApp
     
     # Initialize UI and inject the start_simulation callback

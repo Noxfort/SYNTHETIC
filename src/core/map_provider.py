@@ -22,15 +22,33 @@ import xml.etree.ElementTree as ET
 from haversine import haversine
 import numpy as np
 import math
+from typing import Dict, List, Set, Tuple, Optional
+from src.core.logger import logger
 
 class OSMMapProvider:
-    def __init__(self):
-        self.nodes = {} # {id: (lat, lon)}
-        self.ways = [] # list of lists of node IDs
-        self.road_nodes = set()
-        self.bounds = None # (min_lat, min_lon, max_lat, max_lon)
-        
-    def parse_osm_file(self, filepath):
+    def __init__(self) -> None:
+        self.nodes: Dict[str, Tuple[float, float]] = {} # {id: (lat, lon)}
+        self.ways: List[List[str]] = [] # list of lists of node IDs
+        self.road_nodes: Set[str] = set()
+        self.bounds: Optional[Tuple[float, float, float, float]] = None # (min_lat, min_lon, max_lat, max_lon)
+
+    @staticmethod
+    def load_from_file(filepath: str) -> "OSMMapProvider":
+        """
+        Factory method to load and parse an OSM file.
+        Wraps XML parsing exceptions with clear domain logging.
+        """
+        logger.info(f"Loading OSM map from file: {filepath}")
+        provider = OSMMapProvider()
+        try:
+            provider.parse_osm_file(filepath)
+            logger.info(f"Successfully loaded OSM Map. Nodes: {len(provider.nodes)}, Ways: {len(provider.ways)}")
+            return provider
+        except (ET.ParseError, FileNotFoundError, PermissionError) as e:
+            logger.error(f"Failed to parse OSM map file '{filepath}': {str(e)}")
+            raise ValueError(f"Invalid OSM file or path: {str(e)}") from e
+
+    def parse_osm_file(self, filepath: str) -> None:
         """Parses the OSM file to extract bounds, nodes, and highway ways."""
         tree = ET.parse(filepath)
         root = tree.getroot()
@@ -79,39 +97,39 @@ class OSMMapProvider:
                 for nd in way_nodes:
                     self.road_nodes.add(nd)
 
-    def get_bounds(self):
+    def get_bounds(self) -> Optional[Tuple[float, float, float, float]]:
         return self.bounds
         
-    def snap_to_road(self, lat, lon):
+    def snap_to_road(self, lat: float, lon: float) -> Tuple[float, float]:
         """Finds the closest point on any road segment to the given coordinates."""
         if not self.ways:
             return lat, lon # Fallback
             
-        min_dist = float('inf')
-        best_point = (lat, lon)
+        min_dist: float = float('inf')
+        best_point: Tuple[float, float] = (lat, lon)
         
         # Approximate local flat distance considering Earth curvature at this latitude
-        lat_rad = math.radians(lat)
-        lon_scale = math.cos(lat_rad)
+        lat_rad: float = math.radians(lat)
+        lon_scale: float = math.cos(lat_rad)
         
-        def dist_squared(p1, p2):
-            dy = p1[0] - p2[0]
-            dx = (p1[1] - p2[1]) * lon_scale
+        def dist_squared(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+            dy: float = p1[0] - p2[0]
+            dx: float = (p1[1] - p2[1]) * lon_scale
             return dy**2 + dx**2
             
-        def closest_point_on_segment(p, a, b):
-            dy_ab = b[0] - a[0]
-            dx_ab = (b[1] - a[1]) * lon_scale
-            ab_len_sq = dy_ab**2 + dx_ab**2
+        def closest_point_on_segment(p: Tuple[float, float], a: Tuple[float, float], b: Tuple[float, float]) -> Tuple[float, float]:
+            dy_ab: float = b[0] - a[0]
+            dx_ab: float = (b[1] - a[1]) * lon_scale
+            ab_len_sq: float = dy_ab**2 + dx_ab**2
             
             if ab_len_sq == 0:
                 return a
                 
-            dy_ap = p[0] - a[0]
-            dx_ap = (p[1] - a[1]) * lon_scale
+            dy_ap: float = p[0] - a[0]
+            dx_ap: float = (p[1] - a[1]) * lon_scale
             
-            t = (dy_ap * dy_ab + dx_ap * dx_ab) / ab_len_sq
-            t = max(0, min(1, t)) # Clamp to segment limits
+            t: float = (dy_ap * dy_ab + dx_ap * dx_ab) / ab_len_sq
+            t = max(0.0, min(1.0, t)) # Clamp to segment limits
             
             return (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
 
@@ -131,7 +149,7 @@ class OSMMapProvider:
                         
         return best_point
 
-    def parse_osm_to_graph(self):
+    def parse_osm_to_graph(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Converts the parsed OSM data into Node Features and Edge Index for GATv2.
         Returns:
@@ -142,15 +160,15 @@ class OSMMapProvider:
             return np.array([]), np.array([[], []])
             
         # Create a mapping from OSM node ID to a continuous integer index 0...N-1
-        node_to_idx = {}
-        idx = 0
+        node_to_idx: Dict[str, int] = {}
+        idx: int = 0
         for node_id in self.road_nodes:
             if node_id in self.nodes:
                 node_to_idx[node_id] = idx
                 idx += 1
                 
-        num_nodes = idx
-        node_features = np.zeros((num_nodes, 2), dtype=np.float32) # Features: [lat, lon]
+        num_nodes: int = idx
+        node_features: np.ndarray = np.zeros((num_nodes, 2), dtype=np.float32) # Features: [lat, lon]
         
         for node_id, node_idx in node_to_idx.items():
             node_features[node_idx] = self.nodes[node_id]
@@ -158,18 +176,18 @@ class OSMMapProvider:
         # Normalize features (Optional, but good for GNNs)
         # We can center the coordinates around the mean
         if num_nodes > 0:
-            mean_lat = np.mean(node_features[:, 0])
-            mean_lon = np.mean(node_features[:, 1])
+            mean_lat: float = float(np.mean(node_features[:, 0]))
+            mean_lon: float = float(np.mean(node_features[:, 1]))
             node_features[:, 0] -= mean_lat
             node_features[:, 1] -= mean_lon
             # Scale
-            max_val = np.max(np.abs(node_features))
+            max_val: float = float(np.max(np.abs(node_features)))
             if max_val > 0:
                 node_features /= max_val
             
         # Build Edge Index
-        src = []
-        dst = []
+        src: List[int] = []
+        dst: List[int] = []
         
         for way in self.ways:
             # Connect sequential nodes in the way
@@ -188,5 +206,5 @@ class OSMMapProvider:
                     src.append(v_idx)
                     dst.append(u_idx)
                     
-        edge_index = np.array([src, dst], dtype=np.int64)
+        edge_index: np.ndarray = np.array([src, dst], dtype=np.int64)
         return node_features, edge_index

@@ -19,6 +19,8 @@
 # Date: 2026-02-26
 
 import datetime
+from typing import Dict, Any
+from src.core.logger import logger
 
 class ScreenwriterAgent:
     """
@@ -27,20 +29,20 @@ class ScreenwriterAgent:
     semantic prompt for the Cognitive Engine (Qwen).
     Now operates from a MACRO perspective with creative weather interpretation.
     """
-    def __init__(self, llm_engine):
-        self.llm = llm_engine
+    def __init__(self, llm_engine: Any) -> None:
+        self.llm: Any = llm_engine
 
-    def create_daily_script(self, current_date, constraints: dict) -> dict:
+    def create_daily_script(self, current_date: datetime.date, constraints: Dict[str, Any]) -> Dict[str, Any]:
         """
         Drafts the daily scenario prompt and delegates vector synthesis to the LLM.
         """
         # Force day of week to English regardless of system locale
         english_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        day_of_week = constraints.get('day_of_week', english_days[current_date.weekday()])
+        day_of_week: str = constraints.get('day_of_week', english_days[current_date.weekday()])
         
-        start_time = constraints.get('start_time', '00:00:00')
-        flow_level = constraints.get('flow_level', 'medium').lower()
-        weather_seed = constraints.get('weather', 'Clear')
+        start_time: str = constraints.get('start_time', '00:00:00')
+        flow_level: str = constraints.get('flow_level', 'medium').lower()
+        weather_seed: str = constraints.get('weather', 'Clear')
 
         # Map the UI flow level (PT-BR or EN) to the Macro City Scale context
         city_mapping = {
@@ -53,7 +55,7 @@ class ScreenwriterAgent:
             "large": "Metropolis",
             "caotic": "Megalopolis"
         }
-        city_size = city_mapping.get(flow_level, "Medium City")
+        city_size: str = city_mapping.get(flow_level, "Medium City")
 
         flow_translation = {
             "pequeno": "low",
@@ -65,13 +67,13 @@ class ScreenwriterAgent:
             "large": "high",
             "caotic": "chaotic"
         }
-        english_flow = flow_translation.get(flow_level, "medium")
+        english_flow: str = flow_translation.get(flow_level, "medium")
 
-        print(f"[Screenwriter] Drafting MACRO script for {current_date} ({day_of_week}) at {start_time}...")
-        print(f"[Screenwriter] Scale: {city_size} | Weather Seed: {weather_seed} | Target Flow: {english_flow.upper()}")
+        logger.info(f"[Screenwriter] Drafting MACRO script for {current_date} ({day_of_week}) at {start_time}...")
+        logger.info(f"[Screenwriter] Scale: {city_size} | Weather Seed: {weather_seed} | Target Flow: {english_flow.upper()}")
 
         # The core persona: Shifted from Micro (Driver) to Macro (Omniscient Traffic Network)
-        system_instruction = (
+        system_instruction: str = (
             "You are the Synthetic Screenwriter, an expert macro-level traffic network simulator. "
             "Your job is to describe the systemic physical state of an entire city's traffic grid. "
             "DO NOT write from the perspective of a single driver. Think like an omniscient observer "
@@ -80,16 +82,16 @@ class ScreenwriterAgent:
         )
 
         # The specific context for the current simulation chunk with creative freedom
-        previous_weather = constraints.get('previous_weather', None)
+        previous_weather: Optional[str] = constraints.get('previous_weather', None)
         
-        transition_context = ""
+        transition_context: str = ""
         if previous_weather:
             if previous_weather == weather_seed:
                 transition_context = f"The weather from yesterday ('{previous_weather}') persists into today, carrying over its physical effects on the infrastructure. "
             else:
                 transition_context = f"Yesterday the city experienced '{previous_weather}'. Today, this transitions into '{weather_seed}'. Consider how the aftermath of yesterday's weather impacts today's initial conditions. "
         
-        user_prompt = (
+        user_prompt: str = (
             f"Context: Today is {day_of_week}. The simulation starts exactly at {start_time} (Midnight). "
             f"The environment is a {city_size} with a general traffic flow classification of '{english_flow.upper()}'. "
             f"{transition_context}"
@@ -103,7 +105,7 @@ class ScreenwriterAgent:
         )
 
         # Command the LLM to dream the scenario and extract the mathematical vector
-        scenario_vector = self.llm.dream_scenario_vector(system_instruction, user_prompt)
+        scenario_vector: list = self.llm.dream_scenario_vector(system_instruction, user_prompt)
 
         # Return the package to the Maestro
         return {

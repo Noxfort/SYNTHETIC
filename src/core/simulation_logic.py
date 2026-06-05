@@ -23,7 +23,7 @@ import gc
 import json
 import math
 import random
-from typing import List
+from typing import List, Tuple, Optional
 
 # --- Core Interfaces and Physics ---
 from ui.interfaces import IDataGenerator
@@ -35,6 +35,11 @@ from src.agents.screenwriter import ScreenwriterAgent
 from src.agents.director import DirectorAgent
 from src.models.gatv2 import LightweightGATv2
 from src.core.environment import EnvironmentManager
+from src.core.logger import logger
+from src.core.constants import (
+    DEFAULT_ANOMALY_PROB_ORCHESTRATOR_ANOMALIES,
+    DEFAULT_ANOMALY_PROB_ORCHESTRATOR_GAPS
+)
 import torch
 
 class SimulationOrchestrator:
@@ -45,15 +50,15 @@ class SimulationOrchestrator:
     methods, and DIP by relying on IDataGenerator interface ingestion.
     """
 
-    def __init__(self, config: dict, generators: List[IDataGenerator]):
+    def __init__(self, config: dict, generators: List[IDataGenerator]) -> None:
         self.config = config
         self.generators = generators
-        print(f"Starting AI Simulation with configuration:\n{json.dumps(self.config, indent=2, default=str)}")
+        logger.info(f"Starting AI Simulation with configuration:\n{json.dumps(self.config, indent=2, default=str)}")
 
         slm_mode = self.config['simulation'].get('slm_mode', 'Realista')
         temp_map = {"Ultrarealista": 0.0, "Realista": 0.5, "Criativo": 1.0}
         qwen_temp = temp_map.get(slm_mode, 0.5)
-        print(f"[Maestro] Waking up the Neural Engine (Mode: {slm_mode}, Temp: {qwen_temp})...")
+        logger.info(f"[Maestro] Waking up the Neural Engine (Mode: {slm_mode}, Temp: {qwen_temp})...")
         self.slm = SLMEngine(n_gpu_layers=0, temperature=qwen_temp)
         self.screenwriter = ScreenwriterAgent(self.slm)
         self.director = DirectorAgent()
@@ -62,18 +67,18 @@ class SimulationOrchestrator:
         self.graph_embedding = None
         map_provider = self.config.get('map', {}).get('provider')
         if map_provider:
-            print("[Maestro] Extracting Map Topology via GATv2...")
+            logger.info("[Maestro] Extracting Map Topology via GATv2...")
             try:
                 self.gatv2 = LightweightGATv2()
                 self.graph_embedding = self.gatv2.extract_context(map_provider)
-                print("[Maestro] GATv2 Context extracted successfully.")
-            except Exception as e:
-                print(f"[Maestro] Failed to extract GATv2 context: {e}")
+                logger.info("[Maestro] GATv2 Context extracted successfully.")
+            except (ImportError, ValueError, RuntimeError) as e:
+                logger.error(f"[Maestro] Failed to extract GATv2 context: {e}", exc_info=True)
 
         self._setup_traffic_simulator()
 
         if not self.generators:
-            print("WARNING: No data sources selected. Simulation will run but produce no files.")
+            logger.warning("No data sources selected. Simulation will run but produce no files.")
 
     def _setup_traffic_simulator(self):
         """Initializes the traffic brain with the selected flow strategy"""
@@ -93,7 +98,7 @@ class SimulationOrchestrator:
 
 
 
-    def run(self):
+    def run(self) -> Tuple[bool, Optional[Exception]]:
         """
         Runs the simulation in two phases for optimal memory usage:
         
@@ -113,7 +118,7 @@ class SimulationOrchestrator:
             end_time = start_time + datetime.timedelta(days=duration_days) - datetime.timedelta(seconds=1)
             interval_seconds = int(sim_config['interval_seconds'])
 
-            print(f"[Maestro] Simulation Loop Started: {start_time} to {end_time}")
+            logger.info(f"[Maestro] Simulation Loop Started: {start_time} to {end_time}")
 
             inject_gaps = self.config['problems']['gaps']
             inject_anomalies = self.config['problems']['anomalies']
@@ -121,7 +126,7 @@ class SimulationOrchestrator:
             # =============================================================
             # PHASE 1: Pre-generate ALL daily scripts (LLM loaded)
             # =============================================================
-            print(f"[Maestro] ═══ Phase 1: Dreaming scenarios with LLM ═══")
+            logger.info(f"[Maestro] ═══ Phase 1: Dreaming scenarios with LLM ═══")
             
             day_plans = []
             scan_time = start_time
@@ -167,14 +172,14 @@ class SimulationOrchestrator:
                 scan_time = next_midnight
             
             # Release LLM — all scripts generated, free ~1.7GB
-            print(f"[Maestro] Phase 1 complete: {len(day_plans)} daily scripts generated.")
+            logger.info(f"[Maestro] Phase 1 complete: {len(day_plans)} daily scripts generated.")
             self.slm.release()
             
             # =============================================================
             # PHASE 2: Process each day with Director (VAE-TCN + CSDI)
             # Director handles sequential loading/releasing internally.
             # =============================================================
-            print(f"[Maestro] ═══ Phase 2: Processing days with Director ═══")
+            logger.info(f"[Maestro] ═══ Phase 2: Processing days with Director ═══")
             
             current_time = start_time
             total_days = len(day_plans)
@@ -187,8 +192,8 @@ class SimulationOrchestrator:
                 
                 physics_data = self.director.action(plan['script'], steps_in_chunk, self.graph_embedding)
                 
-                print(f"[Maestro] Generating and Corrupting {steps_in_chunk} files for "
-                      f"{current_date} ({constraints['day_of_week']}) | Weather: {current_weather}...")
+                logger.info(f"[Maestro] Generating and Corrupting {steps_in_chunk} files for "
+                            f"{current_date} ({constraints['day_of_week']}) | Weather: {current_weather}...")
                 
                 for step_idx in range(steps_in_chunk):
                     if current_time >= end_time:
@@ -201,20 +206,21 @@ class SimulationOrchestrator:
                     current_time += datetime.timedelta(seconds=interval_seconds)
 
                 # --- Memory Cleanup between days ---
-                print(f"[Maestro] Day {day_idx + 1}/{total_days} ({current_date}) completed. Releasing memory...")
+                logger.info(f"[Maestro] Day {day_idx + 1}/{total_days} ({current_date}) completed. Releasing memory...")
                 del physics_data
                 gc.collect()
 
-            print("[Maestro] Simulation finished successfully!")
+            logger.info("[Maestro] Simulation finished successfully!")
             return True, None 
 
+        except (ValueError, TypeError, RuntimeError) as e:
+            logger.error(f"[Maestro] Simulation processing error: {e}", exc_info=True)
+            return False, e
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(f"[Maestro] Catastrophic simulation error: {e}")
+            logger.critical(f"[Maestro] Catastrophic unexpected simulation error: {e}", exc_info=True)
             return False, e
 
-    def _process_step(self, step_idx, current_time, weather, physics_data, inject_anomalies, inject_gaps):
+    def _process_step(self, step_idx: int, current_time: datetime.datetime, weather: str, physics_data: dict, inject_anomalies: bool, inject_gaps: bool) -> None:
         """Processes a single step in the simulation."""
         
         # In previously provided code, director's action provided physics_data containing lists
@@ -230,12 +236,12 @@ class SimulationOrchestrator:
         sensor_data = ground_truth.copy()
 
         if inject_anomalies:
-            if random.random() < 0.05:
+            if random.random() < DEFAULT_ANOMALY_PROB_ORCHESTRATOR_ANOMALIES:
                 sensor_data['current_speed'] = min(120, sensor_data['current_speed'] * random.uniform(0.3, 1.8))
                 sensor_data['vehicle_flow'] = int(sensor_data['vehicle_flow'] * random.uniform(0.1, 4.0))
 
         if inject_gaps:
-            if random.random() < 0.03:
+            if random.random() < DEFAULT_ANOMALY_PROB_ORCHESTRATOR_GAPS:
                 sensor_data['current_speed'] = None
                 sensor_data['vehicle_flow'] = None
 

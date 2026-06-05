@@ -23,12 +23,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Ativar TF32 em GPUs modernas (Ampere+) para acelerar multiplicações de matriz em Tensor Cores
-if torch.cuda.is_available():
-    try:
-        torch.set_float32_matmul_precision('high')
-    except AttributeError:
-        pass
+# TF32 is now configured globally in main.py
 
 
 class DiffusionEmbedding(nn.Module):
@@ -111,17 +106,15 @@ class ResidualBlock(nn.Module):
         return (x + residual) / math.sqrt(2.0), skip
 
 
-class CSDIEngine(nn.Module):
+class CSDIBackbone(nn.Module):
     """
-    Conditional Score-based Diffusion engine for time-series generation.
-
-    Uses a DDPM (Denoising Diffusion Probabilistic Model) framework:
-    - Forward process: gradually adds Gaussian noise to real data over T steps.
-    - Reverse process: a neural network learns to denoise step-by-step.
-    - Conditioning: the generation can be conditioned on an external vector
-      (e.g., the scenario vector from the Screenwriter agent).
-
-    Fixed hyperparameters (no Optuna):
+    Conditional Score-based Diffusion Backbone for time-series generation.
+    
+    Responsibility: Pure neural network architecture.
+    Takes noisy input x_t, conditioning vectors, and timestep t, 
+    and predicts the noise added at that step.
+    
+    Dynamically tuned hyperparameters (Optuna):
         residual_channels = 64
         n_residual_layers = 8
         diffusion_steps   = 50
@@ -152,19 +145,6 @@ class CSDIEngine(nn.Module):
         self.residual_channels = residual_channels
         self.n_residual_layers = n_residual_layers
         self.diffusion_steps = diffusion_steps
-
-        # --- Noise Schedule (Linear Beta Schedule) ---
-        betas = torch.linspace(1e-4, 0.02, diffusion_steps)
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
-
-        self.register_buffer("betas", betas)
-        self.register_buffer("alphas", alphas)
-        self.register_buffer("alphas_cumprod", alphas_cumprod)
-        self.register_buffer("sqrt_alphas_cumprod", torch.sqrt(alphas_cumprod))
-        self.register_buffer(
-            "sqrt_one_minus_alphas_cumprod", torch.sqrt(1.0 - alphas_cumprod)
-        )
 
         # --- Input Projection ---
         # Projects the noisy input (n_features) to residual_channels
@@ -209,7 +189,7 @@ class CSDIEngine(nn.Module):
         nn.init.zeros_(self.output_proj.weight)
         nn.init.zeros_(self.output_proj.bias)
 
-        print(f"[CSDI] Engine initialized on {self.device}.")
+        print(f"[CSDI] Backbone initialized on {self.device}.")
         print(
             f"[CSDI] Architecture: {n_residual_layers} ResBlocks, "
             f"{residual_channels} channels, {diffusion_steps} diffusion steps."
@@ -254,186 +234,3 @@ class CSDIEngine(nn.Module):
         out = self.output_proj(out)
 
         return out
-
-    # ------------------------------------------------------------------
-    # Training Utilities
-    # ------------------------------------------------------------------
-
-    def compute_loss(self, x_0, cond, gat_cond):
-        """
-        Computes the simplified DDPM training loss (MSE between true and predicted noise).
-
-        Args:
-            x_0 (Tensor): Clean data [batch, n_features, seq_len].
-            cond (Tensor): Conditioning vector [batch, cond_dim].
-            gat_cond (Tensor): Graph context from GATv2 [batch, gat_dim].
-
-        Returns:
-            Tensor: Scalar loss.
-        """
-        batch_size = x_0.shape[0]
-
-        # Sample random timesteps
-        t = torch.randint(0, self.diffusion_steps, (batch_size,), device=x_0.device)
-
-        # Sample noise
-        noise = torch.randn_like(x_0)
-
-        # Create noisy version: x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * noise
-        sqrt_alpha = self.sqrt_alphas_cumprod[t].view(-1, 1, 1)
-        sqrt_one_minus = self.sqrt_one_minus_alphas_cumprod[t].view(-1, 1, 1)
-        x_noisy = sqrt_alpha * x_0 + sqrt_one_minus * noise
-
-        # Predict noise
-        device_type = 'cuda' if x_0.is_cuda else 'cpu'
-        with torch.autocast(device_type=device_type, enabled=(device_type == 'cuda')):
-            noise_pred = self.forward(x_noisy, cond, gat_cond, t)
-            loss = F.mse_loss(noise_pred, noise)
-
-        return loss
-
-    # ------------------------------------------------------------------
-    # Generation (DDPM Reverse Sampling)
-    # ------------------------------------------------------------------
-
-    @torch.no_grad()
-    def generate(self, cond, gat_cond, seq_len, n_steps=None, seed_tail=None, seed_alpha=0.6):
-        """
-        Generates time-series data from pure Gaussian noise via iterative denoising.
-
-        Supports inter-day context seeding: when seed_tail is provided (the tail
-        of the previous day's output), it is mixed into the initial noise tensor
-        to create smooth temporal transitions between consecutive days.
-
-        Args:
-            cond (Tensor): Conditioning vector [batch, cond_dim].
-            gat_cond (Tensor): Graph context from GATv2 [batch, gat_dim].
-            seq_len (int): Length of the time-series to generate.
-            n_steps (int, optional): Override number of sampling steps.
-            seed_tail (Tensor, optional): Previous day's output tail 
-                [batch, n_features, tail_len]. Used to warm-start the noise.
-            seed_alpha (float): Blending weight for the seed (0.0-1.0).
-                Higher = more continuity from previous day. Default 0.6.
-
-        Returns:
-            Tensor: Generated data [batch, n_features, seq_len].
-        """
-        steps = n_steps or self.diffusion_steps
-        batch_size = cond.shape[0]
-
-        # Start from pure noise
-        x = torch.randn(batch_size, self.n_features, seq_len, device=cond.device)
-
-        # Context Seeding: inject previous day's tail into the noise
-        if seed_tail is not None:
-            tail_len = min(seed_tail.shape[-1], seq_len)
-            # Noisify the tail using the diffusion schedule's final noise level
-            # so the denoising process can converge normally
-            noise_scale = self.sqrt_one_minus_alphas_cumprod[-1]
-            noisy_tail = seed_tail[:, :, -tail_len:] + noise_scale * torch.randn_like(
-                seed_tail[:, :, -tail_len:]
-            )
-            x[:, :, :tail_len] = (
-                seed_alpha * noisy_tail + (1 - seed_alpha) * x[:, :, :tail_len]
-            )
-            print(f"[CSDI] Context seeding: injecting {tail_len} steps from previous day (alpha={seed_alpha})")
-
-        for i in reversed(range(steps)):
-            t = torch.full((batch_size,), i, dtype=torch.long, device=cond.device)
-
-            # Predict noise
-            device_type = 'cuda' if x.is_cuda else 'cpu'
-            with torch.autocast(device_type=device_type, enabled=(device_type == 'cuda')):
-                noise_pred = self.forward(x, cond, gat_cond, t)
-
-            # DDPM update rule
-            alpha_t = self.alphas[i]
-            alpha_bar_t = self.alphas_cumprod[i]
-            beta_t = self.betas[i]
-
-            # Mean of posterior: mu = (1/sqrt(alpha_t)) * (x_t - beta_t / sqrt(1 - alpha_bar_t) * eps_pred)
-            coeff = beta_t / torch.sqrt(1.0 - alpha_bar_t)
-            mu = (1.0 / torch.sqrt(alpha_t)) * (x - coeff * noise_pred)
-
-            # Add noise for all steps except the last
-            if i > 0:
-                sigma = torch.sqrt(beta_t)
-                x = mu + sigma * torch.randn_like(x)
-            else:
-                x = mu
-
-        return x
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    def save_weights(self, path):
-        """Saves all model weights."""
-        torch.save(self.state_dict(), path)
-        print(f"[CSDI] Weights saved to {path}")
-
-    def load_weights(self, path):
-        """Loads model weights."""
-        try:
-            state = torch.load(path, map_location=self.device)
-            self.load_state_dict(state)
-            print(f"[CSDI] Weights loaded successfully from {path}")
-        except FileNotFoundError:
-            print("[CSDI] No pre-trained weights found. Engine will start from scratch.")
-
-
-# ======================================================================
-# Self-test block
-# ======================================================================
-if __name__ == "__main__":
-    print("=" * 60)
-    print("Testing CSDI Engine Architecture...")
-    print("=" * 60)
-
-    batch_size = 4
-    seq_length = 60  # e.g., 60 seconds of data
-    features = 2     # Speed and Flow
-    cond_dim = 2048   # Screenwriter latent vector dimension
-    gat_dim = 32      # GATv2 output dimension
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Initialize model
-    model = CSDIEngine(
-        n_features=features,
-        cond_dim=cond_dim,
-        gat_dim=gat_dim,
-        residual_channels=64,
-        n_residual_layers=8,
-        diffusion_steps=50,
-    ).to(device)
-
-    # Create dummy data
-    dummy_traffic = torch.randn(batch_size, features, seq_length, device=device)
-    dummy_cond = torch.randn(batch_size, cond_dim, device=device)
-    dummy_gat = torch.randn(batch_size, gat_dim, device=device)
-
-    # 1. Test forward pass (noise prediction)
-    t = torch.randint(0, 50, (batch_size,), device=device)
-    noise_pred = model(dummy_traffic, dummy_cond, dummy_gat, t)
-    print(f"\nInput shape:          {dummy_traffic.shape}")
-    print(f"Condition shape:      {dummy_cond.shape}")
-    print(f"GAT Context shape:    {dummy_gat.shape}")
-    print(f"Noise prediction:     {noise_pred.shape}")
-
-    # 2. Test training loss
-    loss = model.compute_loss(dummy_traffic, dummy_cond, dummy_gat)
-    print(f"Training loss:        {loss.item():.4f}")
-
-    # 3. Test generation
-    synthetic = model.generate(dummy_cond, dummy_gat, seq_len=seq_length)
-    print(f"Generated shape:      {synthetic.shape}")
-
-    # 4. Parameter count
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"\nTotal parameters:     {total_params:,}")
-    print(f"Device:               {device}")
-    print("\n" + "=" * 60)
-    print("CSDI Engine is mathematically sound and ready for the Director Agent.")
-    print("=" * 60)

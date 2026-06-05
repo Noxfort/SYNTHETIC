@@ -21,30 +21,47 @@
 import os
 import datetime
 import random
+from typing import Dict, List, Any, Optional
 from ui.interfaces import IDataGenerator
+from src.core.logger import logger
+from src.core.constants import (
+    DEFAULT_FALLBACK_LAT,
+    DEFAULT_FALLBACK_LON,
+    DEFAULT_GAP_PROB_LOOP,
+    DEFAULT_ANOMALY_PROB_LOOP,
+    LOOP_VOLUME_FACTOR_MIN,
+    LOOP_VOLUME_FACTOR_MAX,
+    LOOP_LANE_WEIGHTS,
+    LOOP_LANE_1_SPEED_MULTIPLIER_MIN,
+    LOOP_LANE_1_SPEED_MULTIPLIER_MAX,
+    LOOP_LANE_2_SPEED_MULTIPLIER_MIN,
+    LOOP_LANE_2_SPEED_MULTIPLIER_MAX,
+    LOOP_LIGHT_VEHICLE_LENGTH,
+    LOOP_HEAVY_VEHICLE_LENGTH
+)
 
 class LoopGenerator(IDataGenerator):
     """
     Generates exclusively Inductive Loop data in CSV format.
     """
     
-    def __init__(self, config: dict):
-        self.config = config
-        self.output_dir = os.path.join(config['output_directory'], 'loop')
-        self.problems = config['problems']
-        self.sim_config = config['simulation']
-        self.loop_locations = config.get('map', {}).get('local_points', {}).get('loops', [])
+    def __init__(self, config: dict) -> None:
+        self.config: dict = config
+        self.output_dir: str = os.path.join(config['output_directory'], 'loop')
+        self.problems: dict = config['problems']
+        self.sim_config: dict = config['simulation']
+        self.loop_locations: List[Dict[str, float]] = config.get('map', {}).get('local_points', {}).get('loops', [])
         
         os.makedirs(self.output_dir, exist_ok=True)
         
         # Load base from loop.json
-        self.base_data = self._load_base()
+        self.base_data: dict = self._load_base()
         
         # Quantity configuration
-        num_loops = self.sim_config.get('num_loops', 1)
+        num_loops: int = self.sim_config.get('num_loops', 1)
         
         # ID GENERATION
-        self.loop_ids = [f"loop_{i:02d}" for i in range(1, num_loops + 1)]
+        self.loop_ids: List[str] = [f"loop_{i:02d}" for i in range(1, num_loops + 1)]
 
         # Pre-creation of individual folders
         for loop_id in self.loop_ids:
@@ -53,17 +70,20 @@ class LoopGenerator(IDataGenerator):
     def _load_base(self) -> dict:
         """Loads base structure from src/base/loop.json."""
         import json
-        base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        file_path = os.path.join(base_path, 'src', 'base', 'loop.json')
+        base_path: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        file_path: str = os.path.join(base_path, 'src', 'base', 'loop.json')
 
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception as e:
-            print(f"[CRITICAL] Could not load loop.json: {e}")
+        except (FileNotFoundError, PermissionError) as e:
+            logger.error(f"[LoopGenerator] Base schema config not found: {e}")
             return {"sensors": [{"id": "loop_01"}], "csv_header": "DATE,TIME,SENSOR_ID,LAT,LON,LANE,CLASS,SPEED_KMH,OCCUPANCY_MS"}
+        except json.JSONDecodeError as e:
+            logger.error(f"[LoopGenerator] Base schema configuration file is corrupted: {e}")
+            return {"sensors": [{"id": "loop_01"}], "event_template": {}, "packet_template": {}}
 
-    def generate(self, ground_truth: dict, timestamp: datetime.datetime) -> None:
+    def generate(self, ground_truth: Dict[str, Any], timestamp: datetime.datetime) -> None:
         """Generates CSV counting files for all configured loops."""
         
         # MAESTRO MACRO-GAP CHECK: Abort generation if the physics engine injected a blackout
@@ -71,55 +91,56 @@ class LoopGenerator(IDataGenerator):
             return
 
         for idx, sensor_id in enumerate(self.loop_ids):
-            if self.problems['gaps'] and random.random() < 0.10:
+            if self.problems['gaps'] and random.random() < DEFAULT_GAP_PROB_LOOP:
                 continue
 
-            loop_loc = self.loop_locations[idx] if idx < len(self.loop_locations) else {"lat": 0.0, "lon": 0.0}
+            loop_loc = self.loop_locations[idx] if idx < len(self.loop_locations) else {"lat": DEFAULT_FALLBACK_LAT, "lon": DEFAULT_FALLBACK_LON}
 
-            local_volume_factor = random.uniform(0.04, 0.06)
+            local_volume_factor: float = random.uniform(LOOP_VOLUME_FACTOR_MIN, LOOP_VOLUME_FACTOR_MAX)
             # Garantir pelo menos 1 veículo (mesmo de madrugada) para o arquivo não ficar vazio
-            vehicle_count = max(1, int(ground_truth['vehicle_flow'] * local_volume_factor))
+            vehicle_count: int = max(1, int(ground_truth['vehicle_flow'] * local_volume_factor))
             
             # CSV Header
-            csv_content = [self.base_data.get("csv_header", "DATE,TIME,SENSOR_ID,LAT,LON,LANE,CLASS,SPEED_KMH,OCCUPANCY_MS")]
+            csv_content: List[str] = [self.base_data.get("csv_header", "DATE,TIME,SENSOR_ID,LAT,LON,LANE,CLASS,SPEED_KMH,OCCUPANCY_MS")]
             
             for _ in range(vehicle_count):
-                offset = random.randint(0, 5)
-                event_time = timestamp + datetime.timedelta(seconds=offset)
+                offset: int = random.randint(0, 5)
+                event_time: datetime.datetime = timestamp + datetime.timedelta(seconds=offset)
                 
-                date_str = event_time.strftime("%Y-%m-%d")
-                time_str = event_time.strftime("%H:%M:%S")
+                date_str: str = event_time.strftime("%Y-%m-%d")
+                time_str: str = event_time.strftime("%H:%M:%S")
                 
                 # Lane Logic: 1 (Fast/Light) vs 2 (Slow/Heavy)
-                lane = random.choices([1, 2], weights=[0.6, 0.4])[0]
+                lane: int = random.choices([1, 2], weights=LOOP_LANE_WEIGHTS)[0]
                 
                 if lane == 1:
-                    v_class = random.choice(["LIGHT", "LIGHT", "MOTORCYCLE"])
-                    speed = int(ground_truth['current_speed'] * random.uniform(0.95, 1.20))
+                    v_class: str = random.choice(["LIGHT", "LIGHT", "MOTORCYCLE"])
+                    speed: int = int(ground_truth['current_speed'] * random.uniform(LOOP_LANE_1_SPEED_MULTIPLIER_MIN, LOOP_LANE_1_SPEED_MULTIPLIER_MAX))
                 else:
                     v_class = random.choice(["LIGHT", "HEAVY", "HEAVY", "BUS"])
-                    speed = int(ground_truth['current_speed'] * random.uniform(0.70, 0.95))
+                    speed = int(ground_truth['current_speed'] * random.uniform(LOOP_LANE_2_SPEED_MULTIPLIER_MIN, LOOP_LANE_2_SPEED_MULTIPLIER_MAX))
 
                 # Physics for Occupancy Time
-                length = 4.0 if v_class in ["LIGHT", "MOTORCYCLE"] else 12.0
-                speed_ms = max(1, speed / 3.6)
-                occupancy = int((length / speed_ms) * 1000)
+                length: float = LOOP_LIGHT_VEHICLE_LENGTH if v_class in ["LIGHT", "MOTORCYCLE"] else LOOP_HEAVY_VEHICLE_LENGTH
+                speed_ms: float = max(1.0, speed / 3.6)
+                occupancy: int = int((length / speed_ms) * 1000)
                 
-                lat, lon = loop_loc["lat"], loop_loc["lon"]
-                line = f"{date_str},{time_str},{sensor_id},{lat},{lon},{lane},{v_class},{speed},{occupancy}"
+                lat: float = loop_loc.get("lat", DEFAULT_FALLBACK_LAT)
+                lon: float = loop_loc.get("lon", DEFAULT_FALLBACK_LON)
+                line: str = f"{date_str},{time_str},{sensor_id},{lat},{lon},{lane},{v_class},{speed},{occupancy}"
                 csv_content.append(line)
 
-            if self.problems['anomalies'] and random.random() < 0.03:
+            if self.problems['anomalies'] and random.random() < DEFAULT_ANOMALY_PROB_LOOP:
                 csv_content = ["#ERROR: CONTROLLER RESTART", "#DUMP_FAILED"]
 
             # Save to specific folder: output/loop/loop_XX/file.csv
-            ts_string = timestamp.strftime("%Y%m%d_%H%M%S")
-            filename = f"{sensor_id}_{ts_string}.csv"
-            sensor_dir = os.path.join(self.output_dir, sensor_id)
-            filepath = os.path.join(sensor_dir, filename)
+            ts_string: str = timestamp.strftime("%Y%m%d_%H%M%S")
+            filename: str = f"{sensor_id}_{ts_string}.csv"
+            sensor_dir: str = os.path.join(self.output_dir, sensor_id)
+            filepath: str = os.path.join(sensor_dir, filename)
             
             try:
-                with open(filepath, 'w') as f:
+                with open(filepath, 'w', encoding='utf-8') as f:
                     f.write("\n".join(csv_content))
-            except Exception as e:
-                print(f"LoopGenerator Error {sensor_id}: {e}")
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logger.error(f"LoopGenerator IO Error on {sensor_id}: {e}")

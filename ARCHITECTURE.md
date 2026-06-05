@@ -123,3 +123,23 @@ graph TD
 *   **Single Responsibility Principle (SRP):** Agents are thin orchestrators. Neural logic, parsing, and optimization are separated into `models/`, `core/`, and `optimizer/`. Time/Weather logic is strictly delegated to `EnvironmentManager`.
 *   **Open/Closed Principle (OCP):** UI translations and weather mechanics are driven by JSON configurations, allowing expansion without modifying core Python code.
 *   **Resource Efficiency over Speed:** By intentionally trading slightly slower execution times (due to model loading/unloading) for massive reductions in peak VRAM consumption, the architecture ensures stability on consumer hardware.
+
+---
+
+## 🧪 Testing Suite
+
+`SYNTHETIC` includes a comprehensive unit testing suite to validate all core operations, environment dynamics, translators, dependency checkers, and generators.
+
+*   **Location:** `tests/`
+*   **Framework:** Python's built-in `unittest` module.
+*   **Key Test Files:**
+    *   `tests/test_environment.py`: Validates Ground Zero calculations and Markov-chain weather transitions.
+    *   `tests/test_dependency_checker.py`: Verifies importability check flow.
+    *   `tests/test_translator.py`: Verifies dynamic UI localization loading and translation fallbacks.
+    *   `tests/test_traffic_simulator.py`: Asserts flow strategies and vehicle speed limits.
+    *   `tests/test_generators.py`: Tests structured generation for TomTom, Waze, Camera, and Loop output formatters using mocked data.
+*   **Execution Command:**
+    ```bash
+    .venv/bin/python -m unittest discover -s tests
+    ```
+

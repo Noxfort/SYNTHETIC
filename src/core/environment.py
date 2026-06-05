@@ -22,6 +22,7 @@ import datetime
 import random
 import json
 import os
+from typing import Optional, Tuple
 
 class EnvironmentManager:
     """
@@ -29,56 +30,61 @@ class EnvironmentManager:
     Handles the start time and the realistic evolution of atmospheric conditions.
     """
     
-    _weather_rules = None
+    _weather_rules: dict = None
 
     @classmethod
-    def _load_weather_rules(cls):
+    def _load_weather_rules(cls) -> dict:
         if cls._weather_rules is None:
             config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config", "weather_rules.json")
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     cls._weather_rules = json.load(f)
-            except Exception as e:
-                print(f"[Environment] Warning: Could not load weather_rules.json: {e}")
+            except (FileNotFoundError, PermissionError) as e:
+                from src.core.logger import logger
+                logger.error(f"[Environment] Weather configuration file not found or inaccessible: {e}")
+                cls._weather_rules = {}
+            except json.JSONDecodeError as e:
+                from src.core.logger import logger
+                logger.error(f"[Environment] Weather rules file corrupted: {e}")
                 cls._weather_rules = {}
         return cls._weather_rules
 
     @staticmethod
-    def get_next_monday_midnight():
+    def get_next_monday_midnight() -> datetime.datetime:
         """
         Calculates the exact datetime for the upcoming Monday at 00:00:00.
         Acts as the 'Ground Zero' for the traffic cycle.
         """
-        now = datetime.datetime.now()
-        midnight_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        now: datetime.datetime = datetime.datetime.now()
+        midnight_today: datetime.datetime = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        days_ahead = 0 - midnight_today.weekday()
+        days_ahead: int = 0 - midnight_today.weekday()
         if days_ahead <= 0: 
             days_ahead += 7
             
         return midnight_today + datetime.timedelta(days=days_ahead)
 
     @classmethod
-    def get_dynamic_weather(cls, weather_state=None):
+    def get_dynamic_weather(cls, weather_state: Optional[Tuple[str, str, str]] = None) -> Tuple[Tuple[str, str, str], str]:
         """
         Provides a highly realistic dynamic atmospheric seed using a Markov-like state machine.
         Ensures weather evolves logically (e.g., Rain -> Drizzle -> Overcast -> Sunny) and 
         that intensities/characteristics physically match the active condition.
         """
-        rules = cls._load_weather_rules()
+        rules: dict = cls._load_weather_rules()
         
         # Fallbacks in case JSON is missing or corrupted
-        transitions = rules.get("transitions", {"Partly Cloudy": ["Partly Cloudy"]})
-        category_map = rules.get("category_map", {})
-        intensity_map = rules.get("intensity_map", {"Clear/Cloudy": ["mild"], "Precipitation": ["light"], "Extreme": ["severe"]})
-        char_map = rules.get("char_map", {})
+        transitions: dict = rules.get("transitions", {"Partly Cloudy": ["Partly Cloudy"]})
+        category_map: dict = rules.get("category_map", {})
+        intensity_map: dict = rules.get("intensity_map", {"Clear/Cloudy": ["mild"], "Precipitation": ["light"], "Extreme": ["severe"]})
+        char_map: dict = rules.get("char_map", {})
         
-        initial_states = rules.get("initial_states", ["Partly Cloudy"])
-        initial_weights = rules.get("initial_weights", [100])
+        initial_states: list = rules.get("initial_states", ["Partly Cloudy"])
+        initial_weights: list = rules.get("initial_weights", [100])
         
         if weather_state is None:
             # Pick a starting state. Bias towards normal weather.
-            cond = random.choices(initial_states, weights=initial_weights, k=1)[0]
+            cond: str = random.choices(initial_states, weights=initial_weights, k=1)[0]
         else:
             _, prev_cond, _ = weather_state
             if prev_cond in transitions:
@@ -87,16 +93,16 @@ class EnvironmentManager:
             else:
                 cond = "Partly Cloudy"
                 
-        cat = category_map.get(cond, "Clear/Cloudy")
-        intensity = random.choice(intensity_map.get(cat, ["mild"]))
-        char = random.choice(char_map.get(cond, [""]))
+        cat: str = category_map.get(cond, "Clear/Cloudy")
+        intensity: str = random.choice(intensity_map.get(cat, ["mild"]))
+        char: str = random.choice(char_map.get(cond, [""]))
         
-        new_state = (intensity, cond, char)
+        new_state: Tuple[str, str, str] = (intensity, cond, char)
         
         # Formulate grammatically correct string
         if cat == "Clear/Cloudy":
             # Prevent awkward phrases like "Mild sunny" -> Just "Sunny"
-            weather_str = f"{cond} {char}"
+            weather_str: str = f"{cond} {char}"
         else:
             weather_str = f"{intensity.capitalize()} {cond.lower()} {char}"
             

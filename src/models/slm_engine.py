@@ -22,13 +22,16 @@ import gc
 import os
 import re
 import sys
+from typing import Optional
 import numpy as np
+
+from src.core.logger import logger
 
 # Attempt to import the inference library
 try:
     from llama_cpp import Llama
 except ImportError:
-    print("[CRITICAL] llama-cpp-python not installed. Please run: pip install llama-cpp-python")
+    logger.critical("llama-cpp-python not installed. Please run: pip install llama-cpp-python")
     sys.exit(1)
 
 class SLMEngine:
@@ -38,15 +41,15 @@ class SLMEngine:
     """
 
     # Context window set to 8192 to allow deep cognitive reasoning (Thinking Mode)
-    def __init__(self, model_path: str = None, n_ctx: int = 8192, n_gpu_layers: int = 0, temperature: float = 0.85):
+    def __init__(self, model_path: Optional[str] = None, n_ctx: int = 8192, n_gpu_layers: int = 0, temperature: float = 0.85) -> None:
         """
         Initializes the inference engine with Embedding support enabled.
         """
-        self.temperature = temperature
+        self.temperature: float = temperature
         if model_path is None:
             # Automatic path resolution (lowercase 'vault')
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.model_path = os.path.join(base_dir, "models", "vault", "Phi-4-mini-reasoning-UD-Q6_K_XL.gguf")
+            base_dir: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.model_path: str = os.path.join(base_dir, "models", "vault", "Phi-4-mini-reasoning-UD-Q6_K_XL.gguf")
         else:
             self.model_path = model_path
 
@@ -56,20 +59,20 @@ class SLMEngine:
                 "Please run 'download_qwen.py' first or move the model to the correct directory."
             )
 
-        print(f"[SLMEngine] Loading model for Vector Synthesis from: {self.model_path}...")
-        print(f"[SLMEngine] Context Window Capacity: {n_ctx} tokens.")
+        logger.info(f"[SLMEngine] Loading model for Vector Synthesis from: {self.model_path}...")
+        logger.info(f"[SLMEngine] Context Window Capacity: {n_ctx} tokens.")
 
         try:
-            self.llm = Llama(
+            self.llm: Optional[Llama] = Llama(
                 model_path=self.model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 verbose=False,
                 embedding=True  # CRITICAL: Enables vector extraction
             )
-            print("[SLMEngine] Vector Engine loaded successfully.")
+            logger.info("[SLMEngine] Vector Engine loaded successfully.")
         except Exception as e:
-            raise RuntimeError(f"[SLMEngine] Failed to initialize Llama context: {e}")
+            raise RuntimeError(f"[SLMEngine] Failed to initialize Llama context: {e}") from e
 
     def dream_scenario_vector(self, system_instruction: str, user_prompt: str) -> list:
         """
@@ -87,7 +90,7 @@ class SLMEngine:
         """
         
         # Injecting the Cognitive Directive to force Chain-of-Thought (Thinking Mode)
-        cognitive_instruction = (
+        cognitive_instruction: str = (
             system_instruction + 
             "\n\n[CRITICAL DIRECTIVE]: You are in THINKING MODE. "
             "Before providing the final scenario, you MUST open a <think> tag and write out your step-by-step "
@@ -96,51 +99,53 @@ class SLMEngine:
         )
 
         # 1. Generate the creative text (The "Dream") in memory
-        messages = [
+        messages: list = [
             {"role": "system", "content": cognitive_instruction},
             {"role": "user", "content": user_prompt}
         ]
         
         try:
             # Temperature defined by UI mode, expanded max_tokens for deep thoughts
+            assert self.llm is not None
             completion = self.llm.create_chat_completion(
                 messages=messages,
                 temperature=self.temperature, 
                 max_tokens=1024
             )
-            dream_text = completion['choices'][0]['message']['content']
+            dream_text: str = completion['choices'][0]['message']['content']
             
             # Strip <think>...</think> for display — thinking is internal only
             # The full text (with thinking) is still used for embedding generation
-            visible_text = re.sub(r'<think>.*?</think>', '', dream_text, flags=re.DOTALL).strip()
+            visible_text: str = re.sub(r'<think>.*?</think>', '', dream_text, flags=re.DOTALL).strip()
             
-            print("\n" + "="*50)
-            print("Scenario Description:")
-            print("-" * 50)
-            print(visible_text if visible_text else "[Thinking mode active — scenario encoded directly]")
-            print("="*50 + "\n")
+            logger.info("\n" + "="*50)
+            logger.info("Scenario Description:")
+            logger.info("-" * 50)
+            logger.info(visible_text if visible_text else "[Thinking mode active — scenario encoded directly]")
+            logger.info("="*50 + "\n")
             
             # 2. Convert the Dream (Thoughts + Scenario) to a Vector (Embedding)
-            print("[SLMEngine] Converting thoughts into Latent Vector...")
+            logger.info("[SLMEngine] Converting thoughts into Latent Vector...")
             embedding_response = self.llm.create_embedding(dream_text)
             
             # Extract the raw vector list
             raw_vector = embedding_response['data'][0]['embedding']
             
             # Qwen3 4B latent dimension target (keeping 2048 for CSDI compatibility)
-            latent_dim = 2048
+            latent_dim: int = 2048
+            vector: list
             
             # Robust Mean Pooling to handle variable llama.cpp output structures
             if isinstance(raw_vector[0], list):
                 # Output is a list of token vectors: [[...], [...], ...]
-                print(f"[SLMEngine] Nested token embeddings detected. Pooling {len(raw_vector)} tokens...")
+                logger.info(f"[SLMEngine] Nested token embeddings detected. Pooling {len(raw_vector)} tokens...")
                 vector_matrix = np.array(raw_vector)
                 vector = vector_matrix.mean(axis=0).tolist()
             else:
                 # Output is a flat list
                 if len(raw_vector) > latent_dim and len(raw_vector) % latent_dim == 0:
                     # Flattened token array
-                    print(f"[SLMEngine] Flat token embeddings detected. Pooling...")
+                    logger.info(f"[SLMEngine] Flat token embeddings detected. Pooling...")
                     num_tokens = len(raw_vector) // latent_dim
                     vector_matrix = np.array(raw_vector).reshape(num_tokens, latent_dim)
                     vector = vector_matrix.mean(axis=0).tolist()
@@ -157,11 +162,11 @@ class SLMEngine:
             return vector
             
         except Exception as e:
-            print(f"[SLMEngine] Vector Synthesis Error: {e}")
+            logger.error(f"[SLMEngine] Vector Synthesis Error: {e}", exc_info=True)
             # Return a zero-vector fallback for 4B models
             return [0.0] * 2048
 
-    def release(self):
+    def release(self) -> None:
         """
         Fully releases the LLM from memory to free resources for other models.
         After calling this, the engine cannot generate new vectors until reloaded.
@@ -169,13 +174,13 @@ class SLMEngine:
         is critical for machines with limited memory.
         """
         if hasattr(self, 'llm') and self.llm is not None:
-            print("[SLMEngine] Releasing LLM from memory...")
+            logger.info("[SLMEngine] Releasing LLM from memory...")
             del self.llm
             self.llm = None
             gc.collect()
-            print("[SLMEngine] LLM released successfully. ~4GB freed.")
+            logger.info("[SLMEngine] LLM released successfully. ~4GB freed.")
         else:
-            print("[SLMEngine] LLM already released, nothing to free.")
+            logger.info("[SLMEngine] LLM already released, nothing to free.")
 
 # Self-test block
 if __name__ == "__main__":

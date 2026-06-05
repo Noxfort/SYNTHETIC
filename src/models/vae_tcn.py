@@ -22,12 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Ativar TF32 em GPUs modernas (Ampere+) para acelerar multiplicações de matriz em Tensor Cores
-if torch.cuda.is_available():
-    try:
-        torch.set_float32_matmul_precision('high')
-    except AttributeError:
-        pass
+# TF32 is now configured globally in main.py
 
 class Chomp1d(nn.Module):
     """

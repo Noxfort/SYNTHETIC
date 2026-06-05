@@ -20,49 +20,51 @@
 
 import os
 import json
+from typing import Dict, Any, Optional
+from src.core.logger import logger
 
 class Translator:
     """
     Singleton-like translator to manage UI localization strings.
     Loads dictionaries from ui/locale/*.json.
     """
-    _instance = None
+    _instance: Optional['Translator'] = None
 
-    def __new__(cls):
+    def __new__(cls) -> 'Translator':
         if cls._instance is None:
             cls._instance = super(Translator, cls).__new__(cls)
             cls._instance._init()
         return cls._instance
 
-    def _init(self):
-        self.locale = "en" # default to english
-        self.strings = {}
+    def _init(self) -> None:
+        self.locale: str = "en" # default to english
+        self.strings: Dict[str, str] = {}
         self._load_strings()
 
-    def set_locale(self, locale_code):
+    def set_locale(self, locale_code: str) -> None:
         if locale_code in ["en", "pt-br", "fr", "zh-cn", "ru", "es"]:
             self.locale = locale_code
             self._load_strings()
 
-    def get_locale(self):
+    def get_locale(self) -> str:
         return self.locale
 
-    def _load_strings(self):
-        base_dir = os.path.dirname(__file__)
-        path = os.path.join(base_dir, "locale", f"{self.locale}.json")
+    def _load_strings(self) -> None:
+        base_dir: str = os.path.dirname(__file__)
+        path: str = os.path.join(base_dir, "locale", f"{self.locale}.json")
         try:
             with open(path, "r", encoding="utf-8") as f:
                 self.strings = json.load(f)
-        except Exception as e:
-            print(f"[Translator] Failed to load locale {self.locale}: {e}")
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"[Translator] Failed to load locale {self.locale}: {e}")
             self.strings = {}
 
-    def t(self, key, *args):
+    def t(self, key: str, *args: Any) -> str:
         """
         Translates a given key. Can format if arguments are provided.
         Example: t('err_osm_failed', 'file not found')
         """
-        text = self.strings.get(key, f"[{key}]")
+        text: str = self.strings.get(key, f"[{key}]")
         if args:
             try:
                 return text.format(*args)
@@ -71,4 +73,4 @@ class Translator:
         return text
 
 # Export a global instance for convenience
-translator = Translator()
+translator: Translator = Translator()

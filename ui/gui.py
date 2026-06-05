@@ -21,9 +21,11 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+from typing import Dict, List, Any, Callable, Optional
 from src.core.map_provider import OSMMapProvider
 from ui.map_selector import MapSelectorWindow
 from ui.translator import translator
+from src.core.logger import logger
 
 class DataGeneratorApp(tk.Tk):
     """
@@ -31,33 +33,33 @@ class DataGeneratorApp(tk.Tk):
     This module handles only the visual components and user inputs.
     It passes the configuration to the orchestrator via a callback.
     """
-    def __init__(self, on_generate_callback=None):
+    def __init__(self, on_generate_callback: Optional[Callable[[Dict[str, Any], Callable[[str], None], Callable[[Exception], None]], None]] = None) -> None:
         super().__init__()
 
-        self.on_generate_callback = on_generate_callback
+        self.on_generate_callback: Optional[Callable[[Dict[str, Any], Callable[[str], None], Callable[[Exception], None]], None]] = on_generate_callback
         
         # --- State Variables ---
-        self.var_waze = tk.BooleanVar(value=True)
-        self.var_tomtom = tk.BooleanVar(value=True)
-        self.var_loop = tk.BooleanVar(value=True)
-        self.var_camera = tk.BooleanVar(value=True)
+        self.var_waze: tk.BooleanVar = tk.BooleanVar(value=True)
+        self.var_tomtom: tk.BooleanVar = tk.BooleanVar(value=True)
+        self.var_loop: tk.BooleanVar = tk.BooleanVar(value=True)
+        self.var_camera: tk.BooleanVar = tk.BooleanVar(value=True)
 
-        self.var_gaps = tk.BooleanVar(value=True)
-        self.var_anomalies = tk.BooleanVar(value=True)
+        self.var_gaps: tk.BooleanVar = tk.BooleanVar(value=True)
+        self.var_anomalies: tk.BooleanVar = tk.BooleanVar(value=True)
 
-        self.var_duration = tk.IntVar(value=1) 
-        self.var_interval = tk.IntVar(value=10)
-        self.var_flow_level = tk.StringVar(value="Médio") 
-        self.var_slm_mode = tk.StringVar(value="Realista")
+        self.var_duration: tk.IntVar = tk.IntVar(value=1) 
+        self.var_interval: tk.IntVar = tk.IntVar(value=10)
+        self.var_flow_level: tk.StringVar = tk.StringVar(value="Médio") 
+        self.var_slm_mode: tk.StringVar = tk.StringVar(value="Realista")
 
-        self.var_num_cameras = tk.IntVar(value=5)
-        self.var_num_loops = tk.IntVar(value=5)
+        self.var_num_cameras: tk.IntVar = tk.IntVar(value=5)
+        self.var_num_loops: tk.IntVar = tk.IntVar(value=5)
         
         # Set default output directory
-        default_output = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        self.var_output_dir = tk.StringVar(value=default_output)
+        default_output: str = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        self.var_output_dir: tk.StringVar = tk.StringVar(value=default_output)
         
-        self.var_osm_path = tk.StringVar(value="")
+        self.var_osm_path: tk.StringVar = tk.StringVar(value="")
 
         # Language mapping for the combobox
         self.lang_map = {
@@ -189,16 +191,16 @@ class DataGeneratorApp(tk.Tk):
         # Apply translations
         self.update_ui_texts()
 
-    def on_language_change(self, event=None):
-        selected = self.combo_lang.get()
-        new_locale = self.lang_map.get(selected)
+    def on_language_change(self, event: Optional[tk.Event] = None) -> None:
+        selected: str = self.combo_lang.get()
+        new_locale: Optional[str] = self.lang_map.get(selected)
         if new_locale:
             translator.set_locale(new_locale)
             self.update_ui_texts()
 
-    def update_ui_texts(self):
+    def update_ui_texts(self) -> None:
         """Updates all text in the UI dynamically via the Translator."""
-        t = translator.t
+        t: Callable[[str, Any], str] = translator.t
         self.title(t("app_title"))
         self.lbl_lang.config(text=t("lang_label"))
         
@@ -239,21 +241,21 @@ class DataGeneratorApp(tk.Tk):
         if str(self.action_button.cget("state")) != "disabled":
             self.action_button.config(text=t("btn_generate"))
 
-    def select_output_dir(self):
-        directory = filedialog.askdirectory(initialdir=self.var_output_dir.get())
+    def select_output_dir(self) -> None:
+        directory: str = filedialog.askdirectory(initialdir=self.var_output_dir.get())
         if directory:
             self.var_output_dir.set(directory)
             
-    def select_osm_file(self):
-        filepath = filedialog.askopenfilename(
+    def select_osm_file(self) -> None:
+        filepath: str = filedialog.askopenfilename(
             title=translator.t("section_map"),
             filetypes=[("OpenStreetMap", "*.osm"), ("All files", "*.*")]
         )
         if filepath:
             self.var_osm_path.set(filepath)
 
-    def start_generation(self):
-        osm_path = self.var_osm_path.get()
+    def start_generation(self) -> None:
+        osm_path: str = self.var_osm_path.get()
         if not osm_path or not os.path.exists(osm_path):
             messagebox.showerror(translator.t("err_title"), translator.t("err_osm_missing"))
             return
@@ -261,9 +263,9 @@ class DataGeneratorApp(tk.Tk):
         self.action_button.config(text=translator.t("btn_loading_map"), state="disabled")
         
         try:
-            map_provider = OSMMapProvider()
-            map_provider.parse_osm_file(osm_path)
-        except Exception as e:
+            # Business logic decoupled: map loading delegated to provider static factory
+            map_provider: OSMMapProvider = OSMMapProvider.load_from_file(osm_path)
+        except ValueError as e:
             messagebox.showerror(translator.t("err_title"), translator.t("err_osm_failed", str(e)))
             self.action_button.config(text=translator.t("btn_generate"), state="normal")
             return
@@ -276,17 +278,17 @@ class DataGeneratorApp(tk.Tk):
             lambda cams, loops: self._continue_generation_after_map(cams, loops, map_provider)
         )
 
-    def _continue_generation_after_map(self, cameras, loops, map_provider):
+    def _continue_generation_after_map(self, cameras: Optional[List[Dict[str, float]]], loops: Optional[List[Dict[str, float]]], map_provider: OSMMapProvider) -> None:
         if cameras is None or loops is None:
             self.action_button.config(text=translator.t("btn_generate"), state="normal")
             return
             
         self.action_button.config(text=translator.t("btn_generating"), state="disabled")
         
-        base_output_dir = self.var_output_dir.get()
-        final_output_dir = os.path.join(base_output_dir, "output")
+        base_output_dir: str = self.var_output_dir.get()
+        final_output_dir: str = os.path.join(base_output_dir, "output")
 
-        config = {
+        config: Dict[str, Any] = {
             "sources": {
                 "waze": self.var_waze.get(),
                 "tomtom": self.var_tomtom.get(),
@@ -319,19 +321,19 @@ class DataGeneratorApp(tk.Tk):
         if self.on_generate_callback:
             self.on_generate_callback(config, self.handle_success, self.handle_error)
         else:
-            self.handle_error(Exception("No generation callback provided!"))
+            self.handle_error(ValueError("No generation callback provided!"))
 
-    def handle_success(self, final_output_dir):
+    def handle_success(self, final_output_dir: str) -> None:
         self.after(0, self._on_generation_complete, final_output_dir)
 
-    def handle_error(self, error):
+    def handle_error(self, error: Exception) -> None:
         self.after(0, self._on_generation_error, error)
 
-    def _on_generation_complete(self, final_output_dir):
+    def _on_generation_complete(self, final_output_dir: str) -> None:
         messagebox.showinfo(translator.t("success_title"), translator.t("success_msg", final_output_dir))
         self.action_button.config(text=translator.t("btn_generate"), state="normal")
 
-    def _on_generation_error(self, error):
-        print(f"Simulation error: {error}")
+    def _on_generation_error(self, error: Exception) -> None:
+        logger.error(f"Simulation error: {str(error)}")
         messagebox.showerror(translator.t("err_title"), translator.t("err_generation", str(error)))
         self.action_button.config(text=translator.t("btn_generate"), state="normal")

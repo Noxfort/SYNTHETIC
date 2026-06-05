@@ -24,8 +24,18 @@ import datetime
 import random
 import copy
 import math
+from typing import Dict, List, Any, Optional
 from ui.interfaces import IDataGenerator
-
+from src.core.logger import logger
+from src.core.constants import (
+    EARTH_RADIUS_METERS,
+    KMH_TO_MS_MULTIPLIER,
+    DEFAULT_FALLBACK_LAT,
+    DEFAULT_FALLBACK_LON,
+    MIN_GENERATION_INTERVAL_SECS,
+    DEFAULT_GAP_PROB_TOMTOM,
+    DEFAULT_ANOMALY_PROB_TOMTOM
+)
 
 
 class TomTomGenerator(IDataGenerator):
@@ -35,37 +45,40 @@ class TomTomGenerator(IDataGenerator):
     Enforces a minimum generation interval of 5 minutes (300 seconds).
     """
     
-    def __init__(self, config: dict):
-        self.config = config
-        self.output_dir = os.path.join(config['output_directory'], 'tomtom')
-        self.problems = config['problems']
-        self.last_generation_time = None
+    def __init__(self, config: dict) -> None:
+        self.config: dict = config
+        self.output_dir: str = os.path.join(config['output_directory'], 'tomtom')
+        self.problems: dict = config['problems']
+        self.last_generation_time: Optional[datetime.datetime] = None
         
         os.makedirs(self.output_dir, exist_ok=True)
 
         # Load Coordinates from OSM Map Provider
-        self.coordinates = self._extract_coordinates_from_map()
+        self.coordinates: List[Dict[str, float]] = self._extract_coordinates_from_map()
         
         # Load Base Model
-        self.base_model = self._load_base_model()
+        self.base_model: dict = self._load_base_model()
 
         # Calculate distance
-        self.segment_length_meters = self._calculate_route_length(self.coordinates)
-        print(f"[TomTomGenerator] Route distance: {self.segment_length_meters:.2f} meters")
+        self.segment_length_meters: float = self._calculate_route_length(self.coordinates)
+        logger.info(f"[TomTomGenerator] Route distance: {self.segment_length_meters:.2f} meters")
 
     def _load_base_model(self) -> dict:
         """Loads base structure from src/base/tomtom.json."""
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        file_path = os.path.join(base_path, 'base', 'tomtom.json')
+        base_path: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_path: str = os.path.join(base_path, 'base', 'tomtom.json')
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return data.get('base_flow', {})
-        except Exception as e:
-            print(f"[CRITICAL] Could not load tomtom.json: {e}")
+        except (FileNotFoundError, PermissionError) as e:
+            logger.error(f"[TomTomGenerator] Base schema configuration file not found: {e}")
+            return {}
+        except json.JSONDecodeError as e:
+            logger.error(f"[TomTomGenerator] Base schema configuration file is corrupted: {e}")
             return {}
 
-    def _extract_coordinates_from_map(self) -> list:
+    def _extract_coordinates_from_map(self) -> List[Dict[str, float]]:
         """Extracts a random road segment from the OSM Map Provider to serve as the global incident line."""
         map_provider = self.config.get('map', {}).get('provider')
         if map_provider and map_provider.ways:
@@ -77,12 +90,12 @@ class TomTomGenerator(IDataGenerator):
                 if nd in map_provider.nodes:
                     lat, lon = map_provider.nodes[nd]
                     coords.append({'latitude': lat, 'longitude': lon})
-            return coords
-        return [{'latitude': -23.3, 'longitude': -51.1}] # Fallback
+            if coords:
+                return coords
+        return [{'latitude': DEFAULT_FALLBACK_LAT, 'longitude': DEFAULT_FALLBACK_LON}] # Fallback
 
-    def _haversine_distance(self, lat1, lon1, lat2, lon2):
-        """Calculates distance in meters between two points."""
-        R = 6371000 # Earth radius
+    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculates distance in meters between two points using central constants."""
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
         delta_phi = math.radians(lat2 - lat1)
@@ -93,12 +106,13 @@ class TomTomGenerator(IDataGenerator):
             math.sin(delta_lambda / 2.0)**2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-        return R * c
+        return EARTH_RADIUS_METERS * c
 
-    def _calculate_route_length(self, coordinates: list) -> float:
+    def _calculate_route_length(self, coordinates: List[Dict[str, float]]) -> float:
         """Sums the distance of all points in the coordinate list."""
-        if not coordinates: return 0.0
-        total_distance = 0.0
+        if not coordinates: 
+            return 0.0
+        total_distance: float = 0.0
         for i in range(len(coordinates) - 1):
             p1 = coordinates[i]
             p2 = coordinates[i+1]
@@ -107,7 +121,7 @@ class TomTomGenerator(IDataGenerator):
             total_distance += dist
         return total_distance
 
-    def generate(self, ground_truth: dict, timestamp: datetime.datetime) -> None:
+    def generate(self, ground_truth: Dict[str, Any], timestamp: datetime.datetime) -> None:
         """Generates the JSON file for TomTom."""
         
         # MAESTRO MACRO-GAP CHECK: Abort generation if the physics engine injected a blackout
@@ -117,27 +131,29 @@ class TomTomGenerator(IDataGenerator):
         # Enforce 5-minute (300 seconds) minimum interval
         if self.last_generation_time is not None:
             time_since_last = (timestamp - self.last_generation_time).total_seconds()
-            if time_since_last < 300:
+            if time_since_last < MIN_GENERATION_INTERVAL_SECS:
                 return
                 
         self.last_generation_time = timestamp
 
-        if self.problems['gaps'] and random.random() < 0.1:
+        if self.problems['gaps'] and random.random() < DEFAULT_GAP_PROB_TOMTOM:
             return
 
-        data = copy.deepcopy(self.base_model)
+        data: dict = copy.deepcopy(self.base_model)
         
         # Inject coordinates
+        if 'flowSegmentData' not in data:
+            data['flowSegmentData'] = {}
         data['flowSegmentData']['coordinates'] = self.coordinates
 
-        current_speed_kmh = float(ground_truth['current_speed'])
-        free_flow_speed_kmh = float(ground_truth['free_flow_speed'])
+        current_speed_kmh: float = float(ground_truth['current_speed'])
+        free_flow_speed_kmh: float = float(ground_truth['free_flow_speed'])
         
-        curr_speed_ms = max(0.1, current_speed_kmh / 3.6)
-        free_speed_ms = max(0.1, free_flow_speed_kmh / 3.6)
+        curr_speed_ms: float = max(0.1, current_speed_kmh / KMH_TO_MS_MULTIPLIER)
+        free_speed_ms: float = max(0.1, free_flow_speed_kmh / KMH_TO_MS_MULTIPLIER)
 
-        current_travel_time = int(self.segment_length_meters / curr_speed_ms)
-        free_flow_travel_time = int(self.segment_length_meters / free_speed_ms)
+        current_travel_time: int = int(self.segment_length_meters / curr_speed_ms)
+        free_flow_travel_time: int = int(self.segment_length_meters / free_speed_ms)
 
         seg = data['flowSegmentData']
         seg['currentSpeed'] = int(current_speed_kmh)
@@ -145,15 +161,15 @@ class TomTomGenerator(IDataGenerator):
         seg['currentTravelTime'] = current_travel_time
         seg['freeFlowTravelTime'] = free_flow_travel_time
 
-        if self.problems['anomalies'] and random.random() < 0.05:
+        if self.problems['anomalies'] and random.random() < DEFAULT_ANOMALY_PROB_TOMTOM:
             seg['currentSpeed'] = random.choice([-10, 999])
 
-        ts_string = timestamp.strftime("%Y%m%d_%H%M%S")
-        filename = f"tomtom_flow_{ts_string}.json"
-        filepath = os.path.join(self.output_dir, filename)
+        ts_string: str = timestamp.strftime("%Y%m%d_%H%M%S")
+        filename: str = f"tomtom_flow_{ts_string}.json"
+        filepath: str = os.path.join(self.output_dir, filename)
         
         try:
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"TomTomGenerator Error: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.error(f"TomTomGenerator IO Error on {filename}: {e}")
